@@ -1,0 +1,10 @@
+/_build/
+cover/
+deps/
+doc/
+erl_crash.dump
+*.ez
+gold_backend-*.tar
+.elixir_ls/
+.lexical/
+.env
