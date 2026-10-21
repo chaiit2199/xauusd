@@ -19,7 +19,7 @@ flock -n 9 || { echo 'Another deployment is running'; exit 1; }
 docker compose --env-file /dev/null config --quiet
 docker compose --env-file /dev/null pull api
 docker compose --env-file /dev/null up -d --wait --wait-timeout 120 db
-docker compose --env-file /dev/null run --rm --no-deps -T api eval 'Ecto.Migrator.run(GoldBackend.Repo, Application.app_dir(:gold_backend, "priv/repo/migrations"), :up, all: true)' < /dev/null
+docker compose --env-file /dev/null run --rm --no-deps -T api eval 'GoldBackend.Release.migrate()' < /dev/null
 docker compose --env-file /dev/null up -d --no-deps --force-recreate --wait --wait-timeout 180 api
 container_id="$(docker compose --env-file /dev/null ps -q api)"
 test "$(docker inspect --format '{{.Config.Image}}' "$container_id")" = "$IMAGE_TAG"
