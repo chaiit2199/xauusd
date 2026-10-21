@@ -16,7 +16,7 @@ config :gold_backend, GoldBackendWeb.Endpoint,
 
 config :gold_backend, :ollama,
   url: "http://localhost:11434/api/generate",
-  model: "deepseek-r1:8b",
+  model: "deepseek-r1:1.5b",
   timeout_ms: 120_000
 
 config :logger, :console,

@@ -2,7 +2,7 @@ import Config
 
 config :gold_backend, :ollama,
   url: System.get_env("OLLAMA_URL", "http://localhost:11434/api/generate"),
-  model: System.get_env("OLLAMA_MODEL", "deepseek-r1:8b"),
+  model: System.get_env("OLLAMA_MODEL", "deepseek-r1:1.5b"),
   timeout_ms: String.to_integer(System.get_env("OLLAMA_TIMEOUT_MS", "120000"))
 
 config :gold_backend, :metals_dev_api_key, System.get_env("METALS_DEV_API_KEY")

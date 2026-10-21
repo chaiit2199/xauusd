@@ -2,7 +2,7 @@ defmodule GoldBackend.Services.OllamaAnalyzer do
   @moduledoc """
   Asks a local Ollama model for a Vietnamese XAU/USD note.
 
-  Defaults target a CPU VPS running `deepseek-r1:8b`:
+  Defaults target a CPU VPS running `deepseek-r1:1.5b`:
   the HTTP socket waits 120s, the prompt asks for a short report, and
   `num_predict` caps the answer so the reasoning model can finish.
   `keep_alive` leaves the weights in RAM between the two button clicks.
@@ -20,7 +20,7 @@ defmodule GoldBackend.Services.OllamaAnalyzer do
 
     body =
       Jason.encode!(%{
-        model: Keyword.get(config, :model, "deepseek-r1:8b"),
+        model: Keyword.get(config, :model, "deepseek-r1:1.5b"),
         prompt: build_prompt(indicators, news_list, price_history_count, plan),
         stream: false,
         keep_alive: "30m",
