@@ -10,7 +10,7 @@ services:
       PHX_HOST: ${PHX_HOST:?Set PHX_HOST}
       SECRET_KEY_BASE: ${SECRET_KEY_BASE:?Set SECRET_KEY_BASE}
       PORT: "4000"
-      DATABASE_URL: ecto://${POSTGRES_USER:-gold_backend}:${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD}@db:5432/${POSTGRES_DB:-gold_backend_prod}
+      DATABASE_URL: ecto://${POSTGRES_USER:-gold_backend}:${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD}@db:5432/${POSTGRES_DB:-xau}
       POOL_SIZE: ${POOL_SIZE:-10}
       OLLAMA_URL: ${OLLAMA_URL:-http://localhost:11434/api/generate}
       OLLAMA_MODEL: ${OLLAMA_MODEL:-deepseek-r1:1.5b}
@@ -28,11 +28,15 @@ services:
     environment:
       POSTGRES_USER: ${POSTGRES_USER:-gold_backend}
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD}
-      POSTGRES_DB: ${POSTGRES_DB:-gold_backend_prod}
+      POSTGRES_DB: ${POSTGRES_DB:-xau}
     volumes:
       - postgres_data:/var/lib/postgresql
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U $$POSTGRES_USER -d $$POSTGRES_DB -h 127.0.0.1"]
+      test:
+        [
+          "CMD-SHELL",
+          "pg_isready -U $$POSTGRES_USER -d $$POSTGRES_DB -h 127.0.0.1",
+        ]
       interval: 5s
       timeout: 5s
       retries: 12

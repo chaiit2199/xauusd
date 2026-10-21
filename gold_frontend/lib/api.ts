@@ -6,14 +6,14 @@ type ErrorBody = {
   errors?: { detail?: string };
 };
 
-async function readBody(
+async function readBody<T>(
   response: Response,
-): Promise<ErrorBody & Partial<CrawlResponse> & { data?: AnalyzeData | MarketBoard }> {
+): Promise<ErrorBody & Partial<CrawlResponse> & { data?: T }> {
   const text = await response.text();
   if (!text) return {};
 
   try {
-    return JSON.parse(text) as ErrorBody & Partial<CrawlResponse> & { data?: AnalyzeData };
+    return JSON.parse(text) as ErrorBody & Partial<CrawlResponse> & { data?: T };
   } catch {
     return { message: text.slice(0, 240) };
   }
@@ -52,7 +52,7 @@ export async function fetchOverview(): Promise<MarketBoard> {
       headers: { Accept: "application/json" },
       cache: "no-store",
     });
-    const body = await readBody(response);
+    const body = await readBody<MarketBoard>(response);
 
     if (!response.ok || !body.data) {
       throw new Error(body.message || body.errors?.detail || `HTTP ${response.status}`);
@@ -70,7 +70,7 @@ export async function analyzeMarket(): Promise<AnalyzeData> {
       headers: { Accept: "application/json" },
       cache: "no-store",
     });
-    const body = await readBody(response);
+    const body = await readBody<AnalyzeData>(response);
 
     if (!response.ok || !body.data) {
       throw new Error(body.message || body.errors?.detail || `HTTP ${response.status}`);
