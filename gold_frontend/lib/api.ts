@@ -21,7 +21,8 @@ async function readBody<T>(
 
 function networkError(error: unknown): Error {
   if (error instanceof TypeError) {
-    return new Error(`Không kết nối được máy chủ dữ liệu tại ${apiBase}.`);
+    const target = apiBase || "(same origin /api)";
+    return new Error(`Không kết nối được máy chủ dữ liệu tại ${target}.`);
   }
 
   return error instanceof Error ? error : new Error("Yêu cầu thất bại.");

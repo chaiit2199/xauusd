@@ -5,6 +5,12 @@ defmodule GoldBackendWeb.Router do
     plug :accepts, ["json"]
   end
 
+  scope "/api", GoldBackendWeb do
+    pipe_through :api
+
+    get "/health", HealthController, :show
+  end
+
   scope "/api/trading", GoldBackendWeb do
     pipe_through :api
 

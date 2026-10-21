@@ -23,8 +23,12 @@ docker compose --env-file /dev/null run --rm --no-deps -T api eval 'GoldBackend.
 docker compose --env-file /dev/null up -d --no-deps --force-recreate --wait --wait-timeout 180 api
 container_id="$(docker compose --env-file /dev/null ps -q api)"
 test "$(docker inspect --format '{{.Config.Image}}' "$container_id")" = "$IMAGE_TAG"
-code="$(curl --silent --output /dev/null --write-out '%{http_code}' --max-time 15 "http://127.0.0.1:${HTTP_PORT:-5006}/")"
-test "$code" != "000"
+code="$(curl --silent --output /dev/null --write-out '%{http_code}' --max-time 15 "http://127.0.0.1:${HTTP_PORT:-5005}/api/health")"
+if [[ "$code" != "200" ]]; then
+  echo "ERROR: API health check failed (http status $code); expected 200 from /api/health" >&2
+  docker compose --env-file /dev/null logs --tail=80 api >&2 || true
+  exit 1
+fi
 printf 'IMAGE_TAG=%s\n' "$IMAGE_TAG" > .image.env.tmp
 mv .image.env.tmp .image.env
 echo "API healthy: $IMAGE_TAG (http status $code)"

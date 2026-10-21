@@ -29,9 +29,7 @@ RUN useradd --system --home-dir /app app
 COPY --from=builder --chown=app:app /app/_build/prod/rel/gold_backend ./
 USER app
 EXPOSE 4000
-# Liveness: Bandit accept đang listen. App chưa có /api/health; khi thêm
-# endpoint health, thay bằng: CMD curl --fail --silent http://127.0.0.1:4000/api/health || exit 1
 HEALTHCHECK --interval=10s --timeout=5s --start-period=30s --retries=6 \
-    CMD ["bash", "-c", "exec 3<>/dev/tcp/127.0.0.1/4000"]
+    CMD curl -fsS --max-time 5 http://127.0.0.1:4000/api/health >/dev/null || exit 1
 ENTRYPOINT ["/app/bin/gold_backend"]
 CMD ["start"]

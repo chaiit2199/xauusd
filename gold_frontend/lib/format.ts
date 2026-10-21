@@ -1,4 +1,6 @@
-export const apiBase = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:4000";
+// Empty = same origin (production: reverse proxy /api → backend).
+// Local: set NEXT_PUBLIC_API_URL in .env.local (build-time for Next).
+export const apiBase = (process.env.NEXT_PUBLIC_API_URL ?? "").replace(/\/$/, "");
 
 export function money(value: string | number): string {
   const amount = typeof value === "number" ? value : Number(value);
