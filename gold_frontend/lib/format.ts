@@ -1,5 +1,5 @@
-// Empty = same origin (production: reverse proxy /api → backend).
-// Local: set NEXT_PUBLIC_API_URL in .env.local (build-time for Next).
+// Empty = same origin (production nginx /api → host :5005).
+// Local .env.local: http://127.0.0.1:5005 (never :4000 — that is only inside Docker).
 export const apiBase = (process.env.NEXT_PUBLIC_API_URL ?? "").replace(/\/$/, "");
 
 export function money(value: string | number): string {

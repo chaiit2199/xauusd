@@ -16,7 +16,7 @@ services:
       OLLAMA_MODEL: ${OLLAMA_MODEL:-deepseek-r1:1.5b}
       OLLAMA_TIMEOUT_MS: ${OLLAMA_TIMEOUT_MS:-120000}
       METALS_DEV_API_KEY: ${METALS_DEV_API_KEY:-}
-      CORS_ORIGINS: ${CORS_ORIGINS:-https://crypto.9nine.tech}
+      CORS_ORIGINS: ${CORS_ORIGINS:-https://crypto.9nine.tech,https://xau.9nine.tech}
     ports:
       - "127.0.0.1:${HTTP_PORT:-5005}:4000"
     healthcheck:

@@ -44,7 +44,9 @@ export function Dashboard() {
         }
       } catch (error: unknown) {
         if (!cancelled) {
-          setBoardError(error instanceof Error ? error.message : "Không tải được bảng giá.");
+          setBoardError(
+            error instanceof Error ? error.message : "Không tải được bảng giá.",
+          );
         }
       } finally {
         if (!cancelled) setLoadingBoard(false);
@@ -80,10 +82,13 @@ export function Dashboard() {
 
     try {
       const result = await crawlNews();
+      console.log(result);
       setCrawl(result);
       setBoard(await fetchOverview());
     } catch (error) {
-      setCrawlError(error instanceof Error ? error.message : "Không cập nhật được tin.");
+      setCrawlError(
+        error instanceof Error ? error.message : "Không cập nhật được tin.",
+      );
     } finally {
       setCrawling(false);
     }
@@ -101,7 +106,9 @@ export function Dashboard() {
       setInsightError(result.ai_error);
       setCachedAt(result.ai_cached_at);
     } catch (error) {
-      setAnalyzeError(error instanceof Error ? error.message : "Không lấy được nhận định.");
+      setAnalyzeError(
+        error instanceof Error ? error.message : "Không lấy được nhận định.",
+      );
     } finally {
       analyzingRef.current = false;
       setAnalyzing(false);
@@ -112,7 +119,10 @@ export function Dashboard() {
   const prices = view?.recent_prices.map((tick) => Number(tick.price)) ?? [];
   const first = prices[0];
   const last = prices[prices.length - 1];
-  const delta = prices.length > 1 && first !== undefined && last !== undefined ? last - first : null;
+  const delta =
+    prices.length > 1 && first !== undefined && last !== undefined
+      ? last - first
+      : null;
 
   return (
     <main className="page">
@@ -125,10 +135,19 @@ export function Dashboard() {
           </div>
         </div>
         <div className="actions">
-          <button type="button" className="primary" onClick={onCrawl} disabled={crawling || loadingBoard}>
+          <button
+            type="button"
+            className="primary"
+            onClick={onCrawl}
+            disabled={crawling || loadingBoard}
+          >
             {crawling ? "Đang cập nhật tin…" : "Cập nhật tin"}
           </button>
-          <button type="button" onClick={onAnalyze} disabled={analyzing || !view}>
+          <button
+            type="button"
+            onClick={onAnalyze}
+            disabled={analyzing || !view}
+          >
             {analyzing ? `Đang nhận định ${elapsed}s` : "Nhận định H1"}
           </button>
         </div>
@@ -137,36 +156,50 @@ export function Dashboard() {
       {boardError ? <p className="banner bad">{boardError}</p> : null}
       {crawlError ? <p className="banner bad">{crawlError}</p> : null}
       {analyzeError ? <p className="banner bad">{analyzeError}</p> : null}
-      {crawl ? <p className={crawl.status === "success" ? "banner ok" : "banner bad"}>{crawl.message}</p> : null}
+      {crawl ? (
+        <p className={crawl.status === "success" ? "banner ok" : "banner bad"}>
+          {crawl.message}
+        </p>
+      ) : null}
 
       {crawl ? (
         <ul className="source-row">
           {crawl.sources.map((source) => (
-            <li key={source.source} className={source.status === "ok" ? "ok" : "bad"}>
+            <li
+              key={source.source}
+              className={source.status === "ok" ? "ok" : "bad"}
+            >
               <strong>{source.source}</strong>
               <span>
-                {source.status === "ok" ? `Lưu ${source.saved}/${source.found}` : source.error || "Lỗi"}
+                {source.status === "ok"
+                  ? `Lưu ${source.saved}/${source.found}`
+                  : source.error || "Lỗi"}
               </span>
             </li>
           ))}
         </ul>
       ) : null}
 
-      {loadingBoard && !view ? <p className="banner">Đang tải giá và tin mới nhất.</p> : null}
+      {loadingBoard && !view ? (
+        <p className="banner">Đang tải giá và tin mới nhất.</p>
+      ) : null}
 
       {view ? (
         <>
           {view.warmup ? (
             <p className="banner warn">
-              Giá 5 ngày gần đây vẫn còn dữ liệu khởi tạo, chưa phải giá thị trường liên tục. Phiếu lệnh đang để Không giao dịch.
+              Giá 5 ngày gần đây vẫn còn dữ liệu khởi tạo, chưa phải giá thị
+              trường liên tục. Phiếu lệnh đang để Không giao dịch.
             </p>
           ) : null}
 
           {view.events.length > 0 ? (
             <p className="banner warn">
               Tin USD tác động mạnh:{" "}
-              {view.events.map((event) => `${event.title} (${when(event.time)})`).join(" · ")}. Không vào lệnh
-              trong 30 phút trước và sau giờ ra tin.
+              {view.events
+                .map((event) => `${event.title} (${when(event.time)})`)
+                .join(" · ")}
+              . Không vào lệnh trong 30 phút trước và sau giờ ra tin.
             </p>
           ) : null}
 
@@ -177,7 +210,14 @@ export function Dashboard() {
               <p className="eyebrow">Giá hiện tại</p>
               <p className="price">{money(view.current_price)}</p>
               <p className="price-meta">
-                <span className={view.price_origin === "synthetic" || view.price_origin === "seed" ? "pill warn" : "pill ok"}>
+                <span
+                  className={
+                    view.price_origin === "synthetic" ||
+                    view.price_origin === "seed"
+                      ? "pill warn"
+                      : "pill ok"
+                  }
+                >
                   {originLabel(view.price_origin)}
                 </span>
                 <span>{when(view.as_of)}</span>
@@ -189,7 +229,8 @@ export function Dashboard() {
                 ) : null}
               </p>
               <p className="basis">
-                {view.price_ticks_5d} tick · {view.hourly_samples} mẫu giờ · {view.indicator_basis}
+                {view.price_ticks_5d} tick · {view.hourly_samples} mẫu giờ ·{" "}
+                {view.indicator_basis}
               </p>
             </div>
             <Sparkline values={prices} />

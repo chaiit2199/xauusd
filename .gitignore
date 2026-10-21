@@ -2,5 +2,6 @@
 .env
 .env.*
 !.env.example
+!.env.production
 env.sh
 .image.env
