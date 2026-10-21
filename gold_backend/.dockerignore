@@ -1,0 +1,11 @@
+*
+!mix.exs
+!mix.lock
+!config/
+!config/config.exs
+!config/prod.exs
+!config/runtime.exs
+!lib/
+!lib/**
+!priv/
+!priv/**

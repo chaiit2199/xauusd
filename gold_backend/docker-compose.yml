@@ -1,0 +1,41 @@
+name: xauusd
+services:
+  api:
+    image: ${IMAGE_TAG:?Set IMAGE_TAG}
+    restart: unless-stopped
+    init: true
+    stop_grace_period: 30s
+    environment:
+      PHX_SERVER: "true"
+      PHX_HOST: ${PHX_HOST:?Set PHX_HOST}
+      SECRET_KEY_BASE: ${SECRET_KEY_BASE:?Set SECRET_KEY_BASE}
+      PORT: "4000"
+      DATABASE_URL: ecto://${POSTGRES_USER:-gold_backend}:${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD}@db:5432/${POSTGRES_DB:-gold_backend_prod}
+      POOL_SIZE: ${POOL_SIZE:-10}
+      OLLAMA_URL: ${OLLAMA_URL:-http://localhost:11434/api/generate}
+      OLLAMA_MODEL: ${OLLAMA_MODEL:-deepseek-r1:8b}
+      OLLAMA_TIMEOUT_MS: ${OLLAMA_TIMEOUT_MS:-120000}
+      METALS_DEV_API_KEY: ${METALS_DEV_API_KEY:-}
+      CORS_ORIGINS: ${CORS_ORIGINS:-https://xau.9nine.tech}
+    ports:
+      - "127.0.0.1:${HTTP_PORT:-5006}:4000"
+    depends_on:
+      db:
+        condition: service_healthy
+  db:
+    image: postgres:18
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-gold_backend}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD}
+      POSTGRES_DB: ${POSTGRES_DB:-gold_backend_prod}
+    volumes:
+      - postgres_data:/var/lib/postgresql
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U $$POSTGRES_USER -d $$POSTGRES_DB -h 127.0.0.1"]
+      interval: 5s
+      timeout: 5s
+      retries: 12
+    shm_size: 256mb
+volumes:
+  postgres_data:

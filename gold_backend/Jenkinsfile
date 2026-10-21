@@ -1,0 +1,93 @@
+pipeline {
+  agent any
+  environment {
+    REGISTRY_HOST = 'docker.io'
+    IMAGE_REPOSITORY = 'docker.io/chaiit2199/xauusd'
+    DOCKER_CREDENTIALS_ID = 'docker-hub-credentials'
+    DEPLOY_SSH_CREDENTIALS_ID = 'core-api-production-ssh'
+    DEPLOY_HOST = 'deploy_user@180.93.146.25'
+    DEPLOY_PATH = '/home/deploy_user/xauusd'
+  }
+  options {
+    skipDefaultCheckout(true)
+    disableConcurrentBuilds()
+    buildDiscarder(logRotator(numToKeepStr: '20'))
+    timeout(time: 30, unit: 'MINUTES')
+    timestamps()
+  }
+  parameters {
+    choice(name: 'DEPLOY', choices: ['none', 'production'], description: 'Build/push hoặc deploy API lên VPS')
+  }
+  stages {
+    stage('Checkout') {
+      steps {
+        checkout scm
+        script {
+          env.COMMIT = sh(script: 'git rev-parse HEAD', returnStdout: true).trim()
+          env.IMAGE_TAG = "${env.IMAGE_REPOSITORY}:${env.BUILD_NUMBER}-${env.COMMIT}"
+        }
+      }
+    }
+    stage('Build release') {
+      steps {
+        sh '''#!/usr/bin/env bash
+set -euo pipefail
+docker build --file gold_backend/Dockerfile --label "org.opencontainers.image.revision=$COMMIT" --tag "$IMAGE_TAG" gold_backend
+'''
+      }
+    }
+    stage('Push image') {
+      steps {
+        withCredentials([usernamePassword(credentialsId: env.DOCKER_CREDENTIALS_ID,
+          usernameVariable: 'DOCKER_USER', passwordVariable: 'DOCKER_PASS')]) {
+          sh '''#!/usr/bin/env bash
+set -euo pipefail
+export DOCKER_CONFIG="$(mktemp -d)"
+trap 'rm -rf "$DOCKER_CONFIG"' EXIT
+printf '%s' "$DOCKER_PASS" | docker login "$REGISTRY_HOST" --username "$DOCKER_USER" --password-stdin
+docker push "$IMAGE_TAG"
+'''
+        }
+      }
+    }
+    stage('Deploy and verify') {
+      when { expression { params.DEPLOY == 'production' } }
+      steps {
+        sshagent(credentials: [env.DEPLOY_SSH_CREDENTIALS_ID]) {
+          sh '''#!/usr/bin/env bash
+set -euo pipefail
+echo "Checking deployment prerequisites on $DEPLOY_HOST at $DEPLOY_PATH"
+ssh -o BatchMode=yes -o ConnectTimeout=10 -o StrictHostKeyChecking=yes "$DEPLOY_HOST" "bash -s -- '$DEPLOY_PATH'" <<'REMOTE_CHECK'
+set -euo pipefail
+deploy_path="$1"
+if [[ ! -d "$deploy_path" ]]; then
+  echo "ERROR: Missing deploy directory: $deploy_path" >&2
+  exit 1
+fi
+if [[ ! -r "$deploy_path/env.sh" ]]; then
+  echo "ERROR: Missing or unreadable $deploy_path/env.sh." >&2
+  exit 1
+fi
+if [[ ! -w "$deploy_path" ]]; then
+  echo "ERROR: Deploy directory is not writable: $deploy_path" >&2
+  exit 1
+fi
+command -v docker >/dev/null || { echo "ERROR: Docker is not installed" >&2; exit 1; }
+command -v flock >/dev/null || { echo "ERROR: flock is not installed" >&2; exit 1; }
+docker compose version
+docker ps >/dev/null
+echo "Deployment prerequisites OK"
+REMOTE_CHECK
+echo "Uploading deployment files"
+scp -o BatchMode=yes -o StrictHostKeyChecking=yes gold_backend/docker-compose.yml gold_backend/deploy.sh "$DEPLOY_HOST:$DEPLOY_PATH/"
+ssh -o BatchMode=yes -o StrictHostKeyChecking=yes -o ServerAliveInterval=30 "$DEPLOY_HOST" "cd '$DEPLOY_PATH' && bash deploy.sh '$IMAGE_TAG'"
+'''
+        }
+      }
+    }
+  }
+  post {
+    success { echo "Image: ${env.IMAGE_TAG}; deployment mode: ${params.DEPLOY}" }
+    failure { echo 'Build/deploy failed. Check the failing stage; no automatic schema rollback.' }
+  }
+}
