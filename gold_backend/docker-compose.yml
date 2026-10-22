@@ -12,13 +12,15 @@ services:
       PORT: "4000"
       DATABASE_URL: ecto://${POSTGRES_USER:-gold_backend}:${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD}@db:5432/${POSTGRES_DB:-xau}
       POOL_SIZE: ${POOL_SIZE:-10}
-      OLLAMA_URL: ${OLLAMA_URL:-http://localhost:11434/api/generate}
+      OLLAMA_URL: ${OLLAMA_URL:-http://host.docker.internal:11434/api/generate}
       OLLAMA_MODEL: ${OLLAMA_MODEL:-deepseek-r1:1.5b}
       OLLAMA_TIMEOUT_MS: ${OLLAMA_TIMEOUT_MS:-120000}
       METALS_DEV_API_KEY: ${METALS_DEV_API_KEY:-}
       CORS_ORIGINS: ${CORS_ORIGINS:-https://crypto.9nine.tech,https://xau.9nine.tech}
     ports:
       - "127.0.0.1:${HTTP_PORT:-5005}:4000"
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
     healthcheck:
       test:
         [
