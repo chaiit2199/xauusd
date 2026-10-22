@@ -1,34 +1,92 @@
 defmodule GoldBackend.Services.TelegramNotifier do
   require Logger
 
-  def notify(%{cfd_plan: %{action: action}} = snapshot) when action in ["buy", "sell", "wait"] do
+  def configuration_status do
     config = Application.get_env(:gold_backend, :telegram, [])
-    token = Keyword.get(config, :bot_token)
-    chat = Keyword.get(config, :chat_id)
 
-    if is_binary(token) and token != "" and is_binary(chat) and chat != "" do
-      message = format_message(snapshot)
+    missing =
+      [{:bot_token, "TELEGRAM_BOT_TOKEN"}, {:chat_id, "TELEGRAM_CHAT_ID"}]
+      |> Enum.reject(fn {key, _} -> present?(Keyword.get(config, key)) end)
+      |> Enum.map(&elem(&1, 1))
 
-      case HTTPoison.post(
-             "https://api.telegram.org/bot#{token}/sendMessage",
-             Jason.encode!(%{chat_id: chat, text: message}),
-             [{"Content-Type", "application/json"}],
-             timeout: 5_000,
-             recv_timeout: 5_000
-           ) do
-        {:ok, %HTTPoison.Response{status_code: 200, body: body}} ->
-          unless match?({:ok, %{"ok" => true}}, Jason.decode(body)),
-            do: Logger.warning("Telegram rejected notification")
-
-        _ ->
-          Logger.warning("Telegram notification failed")
-      end
-    end
-
-    :ok
+    %{configured: missing == [], missing: missing}
   end
 
-  def notify(_), do: :ok
+  def validate_config do
+    case configuration_status() do
+      %{configured: true} ->
+        :ok
+
+      %{missing: missing} ->
+        failure(
+          "Thiếu #{Enum.join(missing, ", ")}; kiểm tra env.sh trên VPS và tạo lại container API."
+        )
+    end
+  end
+
+  def notify(snapshot, opts \\ [])
+
+  def notify(%{cfd_plan: %{action: action}} = snapshot, opts)
+      when action in ["buy", "sell", "wait"] do
+    with :ok <- validate_config() do
+      config = Application.get_env(:gold_backend, :telegram, [])
+      token = config |> Keyword.fetch!(:bot_token) |> String.trim()
+      chat = config |> Keyword.fetch!(:chat_id) |> String.trim()
+      post = Keyword.get(opts, :http_post, &HTTPoison.post/4)
+
+      result =
+        post.(
+          "https://api.telegram.org/bot#{token}/sendMessage",
+          Jason.encode!(%{chat_id: chat, text: format_message(snapshot)}),
+          [{"Content-Type", "application/json"}],
+          timeout: 5_000,
+          recv_timeout: 5_000
+        )
+
+      case result do
+        {:ok, %HTTPoison.Response{status_code: status, body: body}} ->
+          case Jason.decode(body) do
+            {:ok, %{"ok" => true}} when status == 200 ->
+              Logger.info("Telegram notification delivered")
+              :ok
+
+            {:ok, %{"description" => description} = response} when is_binary(description) ->
+              code = response["error_code"] || status
+
+              detail =
+                description
+                |> String.replace([token, chat], "[redacted]")
+                |> String.replace(~r/\s+/, " ")
+                |> String.slice(0, 300)
+
+              failure("HTTP #{status}: #{detail}. #{hint(code)}")
+
+            _ ->
+              failure("HTTP #{status}: phản hồi Telegram không hợp lệ.")
+          end
+
+        {:error, %HTTPoison.Error{reason: reason}} ->
+          # Do not log the request URL: it contains the bot token.
+          detail = if is_atom(reason), do: Atom.to_string(reason), else: "network_error"
+          failure("Không kết nối được Telegram (#{detail}); kiểm tra mạng/DNS/TLS của container.")
+      end
+    end
+  end
+
+  def notify(_, _), do: {:error, "Snapshot không hợp lệ để gửi Telegram."}
+
+  defp present?(value), do: is_binary(value) and String.trim(value) != ""
+
+  defp failure(reason) do
+    Logger.warning("Telegram: #{reason}")
+    {:error, reason}
+  end
+
+  defp hint(401), do: "Kiểm tra TELEGRAM_BOT_TOKEN."
+  defp hint(400), do: "Kiểm tra TELEGRAM_CHAT_ID và mở bot để gửi /start."
+  defp hint(403), do: "Mở khóa bot, gửi /start hoặc cấp quyền gửi tin trong nhóm/kênh."
+  defp hint(429), do: "Telegram đang giới hạn tần suất gửi."
+  defp hint(_), do: "Kiểm tra phản hồi Telegram và kết nối của container."
 
   def format_message(%{cfd_plan: plan} = snapshot) do
     label =

@@ -3,6 +3,8 @@ defmodule GoldBackend.Application do
 
   @impl true
   def start(_type, _args) do
+    GoldBackend.Services.TelegramNotifier.validate_config()
+
     children =
       [
         GoldBackend.Repo,

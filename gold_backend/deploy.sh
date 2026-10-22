@@ -16,6 +16,14 @@ set -a
 source ./env.sh
 set +a
 
+# Compose passes these variables to the container; rel/env.sh.eex is not copied
+# into the Docker image. Report missing configuration without printing secrets.
+TELEGRAM_BOT_TOKEN="${TELEGRAM_BOT_TOKEN:-}"
+TELEGRAM_CHAT_ID="${TELEGRAM_CHAT_ID:-}"
+if [[ -z "${TELEGRAM_BOT_TOKEN//[[:space:]]/}" || -z "${TELEGRAM_CHAT_ID//[[:space:]]/}" ]]; then
+  echo "WARNING: Telegram needs TELEGRAM_BOT_TOKEN and TELEGRAM_CHAT_ID in $PWD/env.sh; notifications will not be sent." >&2
+fi
+
 # Jenkins always passes an immutable image. For an operator-triggered recreate,
 # reuse the image recorded after the last healthy deployment.
 if [[ -z "$requested_image" && -r ./.image.env ]]; then

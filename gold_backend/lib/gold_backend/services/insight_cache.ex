@@ -49,7 +49,12 @@ defmodule GoldBackend.Services.InsightCache do
       {:noreply, state}
     else
       task = Task.Supervisor.async_nolink(GoldBackend.TaskSupervisor, &compute/0)
-      Process.send_after(self(), {:timeout, task.ref}, 165_000)
+
+      timeout =
+        Application.get_env(:gold_backend, :ollama, []) |> Keyword.get(:timeout_ms, 120_000)
+
+      # News crawling and headline translation run before the AI request budget.
+      Process.send_after(self(), {:timeout, task.ref}, timeout + 90_000)
       {:noreply, %{state | job: task}}
     end
   end
