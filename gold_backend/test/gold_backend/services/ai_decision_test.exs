@@ -17,6 +17,8 @@ defmodule GoldBackend.Services.AiDecisionTest do
       assert {:ok, _} = Jason.encode(%{ai_error: error})
     end
 
+    assert {:error, _} = AiDecision.decode_response(~s({"response":"{}","done_reason":"length"}))
+
     response = Jason.encode!(%{response: Jason.encode!(%{action: "sell", reason: "Giảm"})})
     assert {:ok, :sell, "Giảm"} = AiDecision.decode_response(response)
   end

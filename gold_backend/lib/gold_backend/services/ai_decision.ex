@@ -1,4 +1,6 @@
 defmodule GoldBackend.Services.AiDecision do
+  require Logger
+
   def analyze(context) do
     config = Application.get_env(:gold_backend, :ollama, [])
 
@@ -25,7 +27,15 @@ defmodule GoldBackend.Services.AiDecision do
       Jason.encode!(%{
         model: Keyword.get(config, :model, "deepseek-r1:1.5b"),
         prompt: prompt,
-        format: "json",
+        format: %{
+          type: "object",
+          properties: %{
+            action: %{type: "string", enum: ["buy", "sell", "wait"]},
+            reason: %{type: "string"}
+          },
+          required: ["action", "reason"]
+        },
+        think: false,
         stream: false,
         keep_alive: "30m",
         options: %{temperature: 0.1, num_predict: 500}
@@ -54,7 +64,6 @@ defmodule GoldBackend.Services.AiDecision do
         {:error, "Ollama xử lý quá thời gian. Kiểm tra model và OLLAMA_TIMEOUT_MS."}
 
       {:error, %HTTPoison.Error{reason: reason}} ->
-        require Logger
         Logger.warning("Ollama connection failed: #{inspect(reason)}")
         {:error, "Không kết nối được Ollama. Kiểm tra dịch vụ và OLLAMA_URL."}
     end
@@ -63,13 +72,28 @@ defmodule GoldBackend.Services.AiDecision do
   end
 
   def decode_response(body) do
-    with {:ok, %{"response" => text}} when is_binary(text) <- Jason.decode(body),
-         true <- String.trim(text) != "",
-         {:ok, result} <- Jason.decode(text) do
-      parse(result)
-    else
-      false -> {:error, "Ollama trả nội dung rỗng; model có thể chưa hoàn thành kết luận."}
-      _ -> {:error, "Ollama trả dữ liệu JSON không hợp lệ."}
+    case Jason.decode(body) do
+      {:ok, %{"response" => text} = response} when is_binary(text) ->
+        cond do
+          String.trim(text) == "" ->
+            Logger.warning(
+              "Ollama response empty: done_reason=#{inspect(response["done_reason"])} eval_count=#{inspect(response["eval_count"])} thinking_present=#{is_binary(response["thinking"]) and response["thinking"] != ""}"
+            )
+
+            {:error, "Ollama trả nội dung rỗng; kiểm tra log để xác định nguyên nhân."}
+
+          response["done_reason"] == "length" ->
+            {:error, "Ollama dừng do hết giới hạn sinh nội dung."}
+
+          true ->
+            case Jason.decode(text) do
+              {:ok, result} -> parse(result)
+              _ -> {:error, "Ollama trả dữ liệu JSON không hợp lệ."}
+            end
+        end
+
+      _ ->
+        {:error, "Ollama trả dữ liệu JSON không hợp lệ."}
     end
   end
 
