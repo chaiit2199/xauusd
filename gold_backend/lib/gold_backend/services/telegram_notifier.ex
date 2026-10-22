@@ -32,7 +32,8 @@ defmodule GoldBackend.Services.TelegramNotifier do
 
   def notify(%{cfd_plan: %{action: action}} = snapshot, opts)
       when action in ["buy", "sell"] do
-    with :ok <- validate_insight(snapshot),
+    with :ok <- validate_slot(snapshot),
+         :ok <- validate_insight(snapshot),
          :ok <- validate_config() do
       config = Application.get_env(:gold_backend, :telegram, [])
       token = config |> Keyword.fetch!(:bot_token) |> String.trim()
@@ -79,6 +80,20 @@ defmodule GoldBackend.Services.TelegramNotifier do
   end
 
   def notify(_, _), do: {:error, "Snapshot không hợp lệ để gửi Telegram."}
+
+  defp validate_slot(%{ai_next_analysis_at: expiry}) do
+    case if(is_binary(expiry), do: DateTime.from_iso8601(expiry), else: :invalid) do
+      {:ok, at, _} ->
+        if DateTime.compare(DateTime.utc_now(), at) == :lt,
+          do: :ok,
+          else: failure("Không gửi nhận định đã hết chu kỳ M15.")
+
+      _ ->
+        failure("Thời hạn nhận định M15 không hợp lệ.")
+    end
+  end
+
+  defp validate_slot(_), do: :ok
 
   defp validate_insight(snapshot) do
     case AiDecision.validate_reason(Map.get(snapshot, :ai_insight)) do

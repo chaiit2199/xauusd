@@ -13,7 +13,7 @@ export function TradeTicket({ plan, aiAction }: TradeTicketProps) {
 
   return (
     <section className={`ticket action-${plan.action}`}>
-      <p className="eyebrow">Kế hoạch giao dịch · H1 · {plan.market_state}</p>
+      <p className="eyebrow">Kế hoạch giao dịch · {plan.timeframe ?? "H1"} · {plan.market_state}</p>
       <div className="decision" role="group" aria-label="Quyết định giao dịch">
         <div className={plan.action === "buy" ? "choice on buy" : "choice"}>Mua</div>
         <div className={plan.action === "sell" ? "choice on sell" : "choice"}>Bán</div>
@@ -85,7 +85,7 @@ export function TradeTicket({ plan, aiAction }: TradeTicketProps) {
         <section className="watchlist" aria-label="Kịch bản chờ xác nhận">
           <div className="watchlist-head">
             <div>
-              <p className="eyebrow">Hồi giá / Retest · H1</p>
+              <p className="eyebrow">Hồi giá / Retest · H1 → M15</p>
               <h3>Kịch bản chờ xác nhận</h3>
             </div>
             <span>Chờ xác nhận</span>

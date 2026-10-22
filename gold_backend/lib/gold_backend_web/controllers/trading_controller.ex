@@ -84,7 +84,10 @@ defmodule GoldBackendWeb.TradingController do
       nil ->
         conn
         |> put_status(503)
-        |> json(%{status: "pending", message: "Đang chờ phiên phân tích M15 đầu tiên tại mốc :00, :15, :30 hoặc :45."})
+        |> json(%{
+          status: "pending",
+          message: "Đang chờ phiên phân tích M15 đầu tiên tại mốc :00, :15, :30 hoặc :45."
+        })
 
       data ->
         json(conn, %{status: "success", data: data})
@@ -121,14 +124,24 @@ defmodule GoldBackendWeb.TradingController do
       ai_error: error,
       ai_cached_at: DateTime.utc_now() |> DateTime.truncate(:second) |> DateTime.to_iso8601(),
       ai_ttl_seconds: InsightCache.interval_seconds(),
-      analysis_candle_closed_at: DateTime.to_iso8601(Map.get(context, :analysis_at, CandleClock.closed_at(DateTime.utc_now()))),
-      ai_next_analysis_at: DateTime.to_iso8601(CandleClock.next_close(Map.get(context, :analysis_at, DateTime.utc_now())))
+      analysis_candle_closed_at:
+        DateTime.to_iso8601(
+          Map.get(context, :analysis_at, CandleClock.closed_at(DateTime.utc_now()))
+        ),
+      ai_next_analysis_at:
+        DateTime.to_iso8601(
+          CandleClock.next_close(Map.get(context, :analysis_at, DateTime.utc_now()))
+        )
     })
   end
 
   defp market_context(opts) do
     now = Keyword.get(opts, :as_of, DateTime.utc_now()) |> CandleClock.closed_at()
-    prices = prices_since(DateTime.add(now, -5, :day)) |> Enum.filter(&(DateTime.compare(&1.timestamp, now) == :lt))
+
+    prices =
+      prices_since(DateTime.add(now, -5, :day))
+      |> Enum.filter(&(DateTime.compare(&1.timestamp, now) == :lt))
+
     h1_end = CandleClock.closed_at(now, 3600)
     closed_h1 = Enum.filter(prices, &(DateTime.compare(&1.timestamp, h1_end) == :lt))
 
@@ -145,7 +158,12 @@ defmodule GoldBackendWeb.TradingController do
       h1_ready = live_h1 != [] and summary.hourly_samples >= 50
       entry = latest.price |> Decimal.round(2) |> Decimal.to_float()
       live_ticks = Enum.count(prices, &(&1.origin in @live_origins))
-      {warmup, warmup_detail} = if h1_ready, do: warmup_state(latest, live_ticks), else: {true, "Chờ đủ 50 nến H1 đã đóng từ giá thị trường để xác định xu hướng."}
+
+      {warmup, warmup_detail} =
+        if h1_ready,
+          do: warmup_state(latest, live_ticks),
+          else: {true, "Chờ đủ 50 nến H1 đã đóng từ giá thị trường để xác định xu hướng."}
+
       m15_setup = M15Signal.assess(Keyword.get(opts, :m15_candles, []), summary.indicators, now)
       events = EconomicCalendar.upcoming_usd(now)
       blocking = EconomicCalendar.blocking(events, now)

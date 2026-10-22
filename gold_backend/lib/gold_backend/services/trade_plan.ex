@@ -1,10 +1,10 @@
 defmodule GoldBackend.Services.TradePlan do
   @moduledoc """
-  H1 decision ticket for an XAUUSD CFD.
+  H1 trend and closed M15 entry ticket for an XAUUSD CFD.
 
   The ticket is the only trade decision. A written commentary may explain it
-  and may not flip the side. Stops are 2× the hourly ATR, targets are twice
-  the stop, and a stop wider than 5× ATR is not used.
+  and may not flip the side. Confirmed M15 sweeps use the wick stop;
+  legacy tickets use 2× ATR. Targets are twice the stop distance.
   """
 
   alias GoldBackend.Services.EntryRules
@@ -19,9 +19,19 @@ defmodule GoldBackend.Services.TradePlan do
     indicators = %{indicators | current_price: entry}
     requested = Keyword.get(opts, :ai_action)
     lean = if requested in [:buy, :sell], do: requested, else: lean(indicators)
-    entry_indicators = if is_map(m15) and is_map(m15.indicators), do: %{m15.indicators | current_price: entry}, else: indicators
+
+    entry_indicators =
+      if is_map(m15) and is_map(m15.indicators),
+        do: %{m15.indicators | current_price: entry},
+        else: indicators
+
     m15_levels? = is_map(m15) and not m15.blocked and m15.action == Atom.to_string(lean)
-    stop_usd = if m15_levels?, do: round2(abs(m15.stop_loss - entry)), else: stop_distance(entry_indicators)
+
+    stop_usd =
+      if m15_levels?,
+        do: round2(abs(m15.stop_loss - entry)),
+        else: stop_distance(entry_indicators)
+
     take_usd = round2(stop_usd * 2)
     rr_after_spread = reward_after_spread(stop_usd, take_usd)
 
@@ -196,6 +206,12 @@ defmodule GoldBackend.Services.TradePlan do
           ((signal_action == :sell and m15.stop_loss <= entry_price(indicators)) or
              (signal_action == :buy and m15.stop_loss >= entry_price(indicators))) ->
         "Giá đã vượt SL của mẫu nến M15; không dùng lại điểm vào."
+
+      is_map(m15) and not m15.blocked and signal_action in [:buy, :sell] and
+          (abs(m15.stop_loss - entry_price(indicators)) > 5 * m15.atr or
+             (signal_action == :sell and
+                entry_price(indicators) - 2 * abs(m15.stop_loss - entry_price(indicators)) <= 0)) ->
+        "Điểm vào hiện tại làm SL vượt 5 ATR M15 hoặc TP không hợp lệ."
 
       v_reversal_against?(signal_action, indicators, price_action) ->
         reversal_block_reason(signal_action, price_action)

@@ -17,6 +17,8 @@ export type Article = {
 
 export type CfdPlan = {
   instrument: string;
+  timeframe?: "H1" | "M15";
+  trend_timeframe?: "H1";
   market: string;
   action: "buy" | "sell" | "wait";
   action_label: string;
@@ -92,6 +94,16 @@ export type PriceTick = {
   origin: string;
 };
 
+export type M15Setup = {
+  blocked: boolean;
+  action: "buy" | "sell" | "wait";
+  reason: string;
+  candle_closed_at: string;
+  pattern: string | null;
+  divergence: "none" | "bearish" | "bullish";
+  indicators: Indicators | null;
+};
+
 export type MarketBoard = {
   current_price: string;
   currency: string;
@@ -113,6 +125,9 @@ export type MarketBoard = {
   news_digest?: string | null;
   events: CalendarEvent[];
   analysis_interval_seconds?: number;
+  analysis_candle_closed_at?: string;
+  ai_next_analysis_at?: string;
+  m15_setup?: M15Setup | null;
   ai_action?: "buy" | "sell" | "wait" | null;
   ai_insight?: string | null;
   ai_error?: string | null;

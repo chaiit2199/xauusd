@@ -134,7 +134,7 @@ defmodule GoldBackend.Services.OllamaAnalyzer do
     news_digest = news_bias_digest(news_bias)
 
     """
-    Bạn là desk risk CFD vàng (XAUUSD), khung H1, chu kỳ nhận định 5 phút.
+    Bạn là desk risk CFD vàng (XAUUSD), khung H1, chu kỳ nhận định 15 phút đồng bộ đóng nến M15.
     Viết tiếng Việt, ngắn, không cảm xúc. Không nêu tên mô hình. Không viết phần suy luận.
     Bạn KHÔNG được đảo quyết định bên dưới. Không được đề xuất chiều lệnh khác.
     Bắt buộc bám số liệu và tin đã cho — cấm nhận định chung chung không trích dẫn.
@@ -178,7 +178,7 @@ defmodule GoldBackend.Services.OllamaAnalyzer do
     3. Định kiến: #{plan.action_label}.
     4. Tin tức: chọn 1–2 tiêu đề cụ thể (hoặc nói rõ không có tin đáng kể) và giải thích ảnh hưởng ngắn hạn tới XAUUSD / USD.
     5. Mức đã chốt: vùng giá #{plan.entry}, cắt lỗ #{plan.stop_loss}, chốt lời #{plan.take_profit}. Không đổi các con số này.
-    6. Rủi ro #{plan.risk_score}/10 và lý do giữ hoặc không vào lệnh trong 5 phút tới.
+    6. Rủi ro #{plan.risk_score}/10 và lý do giữ hoặc không vào lệnh trong chu kỳ M15 tới.
     """
   end
 

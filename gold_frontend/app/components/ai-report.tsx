@@ -29,14 +29,14 @@ export function AiReport({
   cachedAt,
   newsTone,
   nextInSeconds,
-  intervalSeconds = 300,
+  intervalSeconds = 900,
 }: AiReportProps) {
   const cadence = Math.round(intervalSeconds / 60);
 
   return (
     <section className="panel ai-panel">
       <div className="panel-head">
-        <h2>Nhận định AI · H1 · {cadence} phút</h2>
+        <h2>Nhận định AI · H1 → M15 · {cadence} phút</h2>
         <p>
           {pending
             ? `Đang phân tích giá, chỉ báo và tin tức… ${elapsed} giây`
@@ -44,7 +44,7 @@ export function AiReport({
               ? `Cập nhật lúc ${when(cachedAt)}${
                   nextInSeconds != null && nextInSeconds > 0
                     ? ` · cập nhật sau khoảng ${formatCountdown(nextInSeconds)}`
-                    : ""
+                    : " · đang chờ kết quả chu kỳ mới"
                 }`
               : `Tự động cập nhật mỗi ${cadence} phút theo dữ liệu thị trường`}
         </p>

@@ -8,8 +8,9 @@ defmodule GoldBackend.Services.InsightCache do
   def interval_seconds, do: CandleClock.interval_seconds()
 
   def fresh?(%DateTime{} = at, action, current, now \\ DateTime.utc_now()),
-    do: action == current and DateTime.compare(now, at) != :lt and
-      CandleClock.closed_at(at) == CandleClock.closed_at(now)
+    do:
+      action == current and DateTime.compare(now, at) != :lt and
+        CandleClock.closed_at(at) == CandleClock.closed_at(now)
 
   def snapshot do
     case :ets.whereis(@table) do
@@ -18,7 +19,7 @@ defmodule GoldBackend.Services.InsightCache do
 
       _ ->
         case :ets.lookup(@table, :snapshot) do
-          [{:snapshot, data}] -> data
+          [{:snapshot, data}] -> expire_snapshot(data, DateTime.utc_now())
           _ -> nil
         end
     end
@@ -28,12 +29,49 @@ defmodule GoldBackend.Services.InsightCache do
 
   def peek do
     case snapshot() do
-      nil -> %{ai_insight: nil, ai_error: nil, ai_cached_at: nil, ai_ttl_seconds: interval_seconds()}
-      data -> Map.take(data, [:ai_insight, :ai_error, :ai_cached_at, :ai_ttl_seconds])
+      nil ->
+        %{ai_insight: nil, ai_error: nil, ai_cached_at: nil, ai_ttl_seconds: interval_seconds()}
+
+      data ->
+        Map.take(data, [:ai_insight, :ai_error, :ai_cached_at, :ai_ttl_seconds])
     end
   end
 
   def resolve(_), do: peek()
+
+  def expire_snapshot(%{ai_next_analysis_at: expiry} = data, now) do
+    case if(is_binary(expiry), do: DateTime.from_iso8601(expiry), else: :invalid) do
+      {:ok, at, _} ->
+        if DateTime.compare(now, at) != :lt do
+          reason = "Nhận định đã hết chu kỳ M15; chờ kết quả cho nến vừa đóng."
+
+          invalidate(data, reason)
+        else
+          data
+        end
+
+      _ ->
+        invalidate(data, "Thời hạn nhận định M15 không hợp lệ.")
+    end
+  end
+
+  def expire_snapshot(data, _now), do: data
+
+  defp invalidate(data, reason) do
+    Map.merge(data, %{
+      ai_action: nil,
+      ai_insight: nil,
+      ai_error: reason,
+      cfd_plan:
+        Map.merge(data.cfd_plan, %{
+          action: "wait",
+          action_label: "Không giao dịch",
+          block_reason: reason,
+          summary: reason
+        })
+    })
+  end
+
   @impl true
   def init(_) do
     :ets.new(@table, [:named_table, :protected, :set, read_concurrency: true])
@@ -63,8 +101,10 @@ defmodule GoldBackend.Services.InsightCache do
 
   def handle_info({ref, {:ok, snapshot}}, %{job: %{ref: ref}} = state) do
     Process.demonitor(ref, [:flush])
+
     if CandleClock.current?(state.job_slot, DateTime.utc_now()) do
       :ets.insert(@table, {:snapshot, snapshot})
+
       Task.Supervisor.start_child(GoldBackend.TaskSupervisor, fn ->
         TelegramNotifier.notify(snapshot)
       end)

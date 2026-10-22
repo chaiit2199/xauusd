@@ -88,7 +88,7 @@ export function Dashboard({ page = "overview", initialSide = "buy" }: { page?: D
 
   useEffect(() => {
     const ttl =
-      board?.ai_ttl_seconds ?? board?.analysis_interval_seconds ?? 300;
+      board?.ai_ttl_seconds ?? board?.analysis_interval_seconds ?? 900;
 
     function tick() {
       if (!cachedAt) {
@@ -102,9 +102,12 @@ export function Dashboard({ page = "overview", initialSide = "buy" }: { page?: D
         return;
       }
 
+      const scheduledMs = board?.ai_next_analysis_at
+        ? Date.parse(board.ai_next_analysis_at)
+        : (Math.floor(cachedMs / (ttl * 1000)) + 1) * ttl * 1000;
       const remaining = Math.max(
         0,
-        Math.ceil((cachedMs + ttl * 1000 - Date.now()) / 1000),
+        Math.ceil((scheduledMs - Date.now()) / 1000),
       );
       setNextIn(remaining);
     }
@@ -112,7 +115,7 @@ export function Dashboard({ page = "overview", initialSide = "buy" }: { page?: D
     tick();
     const id = window.setInterval(tick, 1_000);
     return () => window.clearInterval(id);
-  }, [cachedAt, board?.ai_ttl_seconds, board?.analysis_interval_seconds]);
+  }, [cachedAt, board?.ai_ttl_seconds, board?.analysis_interval_seconds, board?.ai_next_analysis_at]);
 
   async function onCrawl() {
     setCrawling(true);
@@ -159,7 +162,7 @@ export function Dashboard({ page = "overview", initialSide = "buy" }: { page?: D
 
   const view = board;
   const intervalSeconds =
-    view?.analysis_interval_seconds ?? view?.ai_ttl_seconds ?? 300;
+    view?.analysis_interval_seconds ?? view?.ai_ttl_seconds ?? 900;
 
   return (
     <div className="page">
@@ -188,7 +191,7 @@ export function Dashboard({ page = "overview", initialSide = "buy" }: { page?: D
         <div className="section-intro">
           <p className="eyebrow">XAUUSD · CFD</p>
           <h1>{page === "overview" ? "Thị trường vàng" : page === "trading" ? "Kế hoạch giao dịch" : "Tin tức & phân tích"}</h1>
-          <p>{page === "overview" ? "Giá vàng, tín hiệu và thông tin thị trường." : page === "trading" ? "Phân tích H1 và tính toán khối lượng trước khi vào lệnh." : "Theo dõi tin kinh tế và các sự kiện ảnh hưởng đến vàng."}</p>
+          <p>{page === "overview" ? "Giá vàng, tín hiệu và thông tin thị trường." : page === "trading" ? "H1 định hướng · M15 xác nhận điểm vào sau khi đóng nến." : "Theo dõi tin kinh tế và các sự kiện ảnh hưởng đến vàng."}</p>
         </div>
 
       {boardError ? <p className="banner bad" role="alert">Chưa thể cập nhật bảng giá. {view ? "Đang hiển thị báo giá gần nhất. " : ""}{boardError}</p> : null}
@@ -264,6 +267,13 @@ export function Dashboard({ page = "overview", initialSide = "buy" }: { page?: D
           {view.news_digest ? (
             <p className="banner">{view.news_digest}</p>
           ) : null}
+
+          {view.m15_setup ? <section className="panel">
+            <div className="panel-head"><h2>Xác nhận M15</h2><p>Nến đóng lúc {when(view.m15_setup.candle_closed_at)}</p></div>
+            <p className="empty">{view.m15_setup.reason}</p>
+            <p className="basis">H1 định hướng · Chỉ đánh giá nến đã đóng · Mốc :00 / :15 / :30 / :45</p>
+            {view.m15_setup.divergence !== "none" ? <p className="banner warn">Phân kỳ RSI {view.m15_setup.divergence === "bearish" ? "giảm" : "tăng"} · Cảnh báo, chưa phải lệnh.</p> : null}
+          </section> : null}
 
           {page !== "news" ? <TradeTicket plan={view.cfd_plan} aiAction={view.ai_action} /> : null}
 
