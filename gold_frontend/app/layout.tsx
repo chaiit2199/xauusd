@@ -1,22 +1,22 @@
 import type { Metadata } from "next";
-import { Be_Vietnam_Pro } from "next/font/google";
 import "./globals.css";
 
-const sans = Be_Vietnam_Pro({
-  subsets: ["vietnamese", "latin"],
-  weight: ["400", "500", "600", "700"],
-  variable: "--font-sans",
-});
-
 export const metadata: Metadata = {
-  title: "XAUUSD CFD",
-  description: "Điểm vào, cắt lỗ, chốt lời và rủi ro cho CFD vàng.",
+  title: { default: "Vàng · XAUUSD", template: "%s · Vàng" },
+  description: "Theo dõi giá vàng, phân tích thị trường và lập kế hoạch giao dịch XAUUSD.",
+  icons: {
+    icon: [
+      { url: "/brand/favicon-32.png", sizes: "32x32", type: "image/png" },
+      { url: "/icon.svg", type: "image/svg+xml" },
+    ],
+    apple: "/brand/apple-touch-icon.png",
+  },
 };
 
 export default function RootLayout({ children }: { children: React.ReactNode }) {
   return (
     <html lang="vi">
-      <body className={sans.variable}>{children}</body>
+      <body>{children}</body>
     </html>
   );
 }

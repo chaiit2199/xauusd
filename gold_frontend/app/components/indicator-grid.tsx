@@ -59,7 +59,7 @@ export function IndicatorGrid({ indicators, alerts }: IndicatorGridProps) {
     {
       label: "Pivot",
       value: num(indicators.pivot_level.p),
-      note: `R1 ${num(indicators.pivot_level.r1)} · S1 ${num(indicators.pivot_level.s1)}`,
+      note: `Kháng cự R1 ${num(indicators.pivot_level.r1)} · Hỗ trợ S1 ${num(indicators.pivot_level.s1)}`,
       tone: "neutral",
     },
     {
@@ -79,7 +79,7 @@ export function IndicatorGrid({ indicators, alerts }: IndicatorGridProps) {
   return (
     <section className="panel">
       <div className="panel-head">
-        <h2>10 chỉ số</h2>
+        <h2>Chỉ báo kỹ thuật · H1</h2>
         <p>Tính trên giá đóng cửa từng giờ.</p>
       </div>
       <div className="indicator-grid">

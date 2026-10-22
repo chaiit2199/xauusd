@@ -3,13 +3,8 @@ defmodule GoldBackend.Services.AiLanguageRepairTest do
 
   alias GoldBackend.Services.AiDecision
 
-  @english String.duplicate("Price is above SMA20 with positive MACD; wait for confirmation. ", 3)
-  @vietnamese String.trim(
-                String.duplicate(
-                  "Giá nằm trên SMA20 với MACD dương; chờ xác nhận và theo dõi rủi ro. ",
-                  3
-                )
-              )
+  @english "Price is above SMA20 with positive MACD; wait for confirmation. News is unavailable, so the risk of an unexpected reversal remains. Monitor momentum before opening a position."
+  @vietnamese "Giá nằm trên SMA20 với MACD dương; chờ xác nhận trước khi mở vị thế. Chưa có tin tức để đánh giá tác động ngắn hạn. Theo dõi động lượng và rủi ro đảo chiều bất ngờ."
 
   setup do
     previous = Application.get_env(:gold_backend, :ollama)
@@ -69,6 +64,55 @@ defmodule GoldBackend.Services.AiLanguageRepairTest do
     assert {:ok, :buy, _} = AiDecision.analyze(context, http_post: post)
     assert_received :called
     refute_received :called
+  end
+
+  test "repetitive output is rejected without trying to translate a broken rationale", %{
+    context: context
+  } do
+    post = fn _, _, _, _ ->
+      send(self(), :called)
+
+      response(
+        "sell",
+        String.duplicate("Giá giảm với diagonal positive technical indicators. ", 5)
+      )
+    end
+
+    assert {:error, reason} = AiDecision.analyze(context, http_post: post)
+    assert reason =~ "lặp nội dung"
+    assert_received :called
+    refute_received :called
+  end
+
+  test "a mixed-language rationale is repaired once and the repair must pass quality checks", %{
+    context: context
+  } do
+    for repaired <- [
+          @vietnamese,
+          String.duplicate("Giá tăng nên chờ xác nhận trước khi mở vị thế. ", 4)
+        ] do
+      post = fn _, body, _, _ ->
+        send(self(), :called)
+
+        case get_in(Jason.decode!(body), ["format", "properties", "action", "enum"]) do
+          ["wait"] -> response("wait", repaired)
+          _ -> response("wait", "Vàng. " <> @english)
+        end
+      end
+
+      result = AiDecision.analyze(context, http_post: post)
+
+      if repaired == @vietnamese do
+        assert {:ok, :wait, @vietnamese} = result
+      else
+        assert {:error, reason} = result
+        assert reason =~ "lặp nội dung"
+      end
+
+      assert_received :called
+      assert_received :called
+      refute_received :called
+    end
   end
 
   test "repair still in English is rejected after two requests", %{context: context} do
@@ -231,7 +275,8 @@ defmodule GoldBackend.Services.AiLanguageRepairTest do
   end
 
   test "decomposed Vietnamese accents are normalized before validation" do
-    reason = String.duplicate("Giá trên SMA20, MACD dương, chờ xác nhận thêm trước khi mua. ", 3)
+    reason =
+      "Giá trên SMA20, MACD dương, chờ xác nhận thêm trước khi mua. Chưa có tin tức mới để đánh giá rủi ro đảo chiều trong phiên."
 
     assert {:ok, :wait, normalized} =
              AiDecision.parse(%{"action" => "wait", "reason" => String.normalize(reason, :nfd)})

@@ -1,18 +1,23 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
+import Link from "next/link";
 import { analyzeMarket, crawlNews, fetchOverview } from "../../lib/api";
-import { money, originLabel, when } from "../../lib/format";
+import { when } from "../../lib/format";
 import type { CrawlResponse, MarketBoard } from "../../lib/types";
 import { AiReport } from "./ai-report";
 import { IndicatorGrid } from "./indicator-grid";
 import { NewsList } from "./news-list";
-import { Sparkline } from "./sparkline";
+import { MarketOverview } from "./market-overview";
 import { TradeTicket } from "./trade-ticket";
+import { SiteHeader, type DeskPage } from "./site-header";
+import { LotCalculator } from "./lot-calculator";
+import { MarketContext } from "./market-context";
+import { EconomicEvents } from "./economic-events";
 
 const BOARD_MS = 60_000;
 
-export function Dashboard() {
+export function Dashboard({ page = "overview", initialSide = "buy" }: { page?: DeskPage; initialSide?: "buy" | "sell" }) {
   const [crawling, setCrawling] = useState(false);
   const [analyzing, setAnalyzing] = useState(false);
   const [loadingBoard, setLoadingBoard] = useState(true);
@@ -117,6 +122,7 @@ export function Dashboard() {
       const result = await crawlNews();
       setCrawl(result);
       setBoard(await fetchOverview());
+      setBoardError(null);
     } catch (error) {
       setCrawlError(
         error instanceof Error ? error.message : "Không cập nhật được tin.",
@@ -136,6 +142,7 @@ export function Dashboard() {
     try {
       const result = await analyzeMarket();
       setBoard(result);
+      setBoardError(null);
       setInsight(result.ai_insight);
       setInsightError(result.ai_error);
       setCachedAt(result.ai_cached_at);
@@ -151,27 +158,12 @@ export function Dashboard() {
   }
 
   const view = board;
-  const prices = view?.recent_prices.map((tick) => Number(tick.price)) ?? [];
-  const first = prices[0];
-  const last = prices[prices.length - 1];
-  const delta =
-    prices.length > 1 && first !== undefined && last !== undefined
-      ? last - first
-      : null;
   const intervalSeconds =
     view?.analysis_interval_seconds ?? view?.ai_ttl_seconds ?? 300;
 
   return (
-    <main className="page">
-      <header className="topbar">
-        <div className="brand">
-          <span className="mark">Au</span>
-          <div>
-            <p className="eyebrow">XAUUSD · CFD</p>
-            <h1>Bàn lệnh vàng</h1>
-          </div>
-        </div>
-        <div className="actions">
+    <div className="page">
+      <SiteHeader active={page}>
           <button
             type="button"
             className="primary"
@@ -186,17 +178,22 @@ export function Dashboard() {
             disabled={analyzing || !view}
           >
             {analyzing
-              ? `Đang nhận định ${elapsed}s`
+              ? `Đang phân tích · ${elapsed} giây`
               : nextIn != null && nextIn > 0
-                ? `Tải lại nhận định · còn ${Math.ceil(nextIn / 60)}p`
-                : "Tải lại nhận định"}
+                ? `Cập nhật nhận định · còn ${Math.ceil(nextIn / 60)} phút`
+                : "Cập nhật nhận định"}
           </button>
+      </SiteHeader>
+      <main id="content">
+        <div className="section-intro">
+          <p className="eyebrow">XAUUSD · CFD</p>
+          <h1>{page === "overview" ? "Thị trường vàng" : page === "trading" ? "Kế hoạch giao dịch" : "Tin tức & phân tích"}</h1>
+          <p>{page === "overview" ? "Giá vàng, tín hiệu và thông tin thị trường." : page === "trading" ? "Phân tích H1 và tính toán khối lượng trước khi vào lệnh." : "Theo dõi tin kinh tế và các sự kiện ảnh hưởng đến vàng."}</p>
         </div>
-      </header>
 
-      {boardError ? <p className="banner bad">{boardError}</p> : null}
-      {crawlError ? <p className="banner bad">{crawlError}</p> : null}
-      {analyzeError ? <p className="banner bad">{analyzeError}</p> : null}
+      {boardError ? <p className="banner bad" role="alert">Chưa thể cập nhật bảng giá. {view ? "Đang hiển thị báo giá gần nhất. " : ""}{boardError}</p> : null}
+      {crawlError ? <p className="banner bad" role="alert">{crawlError}</p> : null}
+      {analyzeError ? <p className="banner bad" role="alert">{analyzeError}</p> : null}
       {crawl ? (
         <p className={crawl.status === "success" ? "banner ok" : "banner bad"}>
           {crawl.message}
@@ -221,18 +218,35 @@ export function Dashboard() {
         </ul>
       ) : null}
 
-      {loadingBoard && !view ? (
-        <p className="banner">Đang tải giá và tin mới nhất.</p>
+      {page === "trading" ? <LotCalculator initialSide={initialSide} currentPrice={view && !["seed", "synthetic"].includes(view.price_origin) ? view.current_price : undefined} /> : null}
+
+      {loadingBoard && !view && page === "news" ? <p className="banner" role="status">Đang cập nhật tin thị trường…</p> : null}
+      {loadingBoard && !view && page !== "news" ? (
+        <section className="hero loading-quote" aria-busy="true" aria-label="Bảng giá XAUUSD">
+          <p className="eyebrow">XAUUSD · USD / oz</p>
+          <p className="price" aria-hidden="true">—</p>
+          <p className="empty" role="status">Đang cập nhật báo giá XAUUSD…</p>
+        </section>
       ) : null}
 
       {view ? (
         <>
-          {view.warmup ? (
+          {page !== "news" ? <MarketOverview board={view} /> : null}
+          {page === "overview" ? <>
+            <MarketContext />
+            <div className="trade-shortcuts">
+              <span>Lập kế hoạch XAUUSD</span>
+              <Link className="trade-link buy" href="/giao-dich?side=buy">Mua</Link>
+              <Link className="trade-link sell" href="/giao-dich?side=sell">Bán</Link>
+            </div>
+          </> : null}
+
+          {page !== "news" && view.warmup ? (
             <p className="banner warn">
               {view.warmup_detail ||
-                "Đang warmup chỉ báo: cần cửa sổ ~5 ngày giá theo giờ (SMA20/EMA50/ATR). Seed chỉ để khởi tạo lịch sử — phiếu lệnh khóa «Không giao dịch» đến khi có đủ giá thị trường thật."}
+                "Đang khởi tạo chỉ báo H1. Chờ đủ dữ liệu thị trường để đánh giá điều kiện giao dịch."}
               {typeof view.live_price_ticks === "number"
-                ? ` Tick live hiện có: ${view.live_price_ticks}/${view.price_ticks_5d}.`
+                ? ` Số mẫu giá thị trường: ${view.live_price_ticks}/${view.price_ticks_5d}.`
                 : null}
             </p>
           ) : null}
@@ -251,43 +265,19 @@ export function Dashboard() {
             <p className="banner">{view.news_digest}</p>
           ) : null}
 
-          <TradeTicket plan={view.cfd_plan} aiAction={view.ai_action} />
+          {page !== "news" ? <TradeTicket plan={view.cfd_plan} aiAction={view.ai_action} /> : null}
 
-          <section className="hero">
-            <div>
-              <p className="eyebrow">Giá hiện tại</p>
-              <p className="price">{money(view.current_price)}</p>
-              <p className="price-meta">
-                <span
-                  className={
-                    view.price_origin === "synthetic" ||
-                    view.price_origin === "seed"
-                      ? "pill warn"
-                      : "pill ok"
-                  }
-                >
-                  {originLabel(view.price_origin)}
-                </span>
-                <span>{when(view.as_of)}</span>
-                {delta !== null ? (
-                  <span className={delta >= 0 ? "up-text" : "down-text"}>
-                    {delta >= 0 ? "+" : ""}
-                    {money(delta)} trên biểu đồ
-                  </span>
-                ) : null}
-              </p>
-              <p className="basis">
-                {view.price_ticks_5d} tick / 5 ngày
-                {typeof view.live_price_ticks === "number"
-                  ? ` · ${view.live_price_ticks} live`
-                  : ""}{" "}
-                · {view.hourly_samples} mẫu giờ · {view.indicator_basis}
-              </p>
-            </div>
-            <Sparkline values={prices} />
-          </section>
+          {page === "trading" ? <IndicatorGrid indicators={view.indicators_10} alerts={view.alerts} /> : null}
+          {page === "news" ? <EconomicEvents events={view.events} /> : null}
 
-          <IndicatorGrid indicators={view.indicators_10} alerts={view.alerts} />
+          {page !== "trading" ? <div className="news-band">
+            <NewsList
+              title="Tin mới nhất"
+              filterable={page === "news"}
+              articles={view.news_3d}
+              empty="Chưa có tin trong 3 ngày gần nhất. Chọn “Cập nhật tin” để đồng bộ."
+            />
+          </div> : null}
 
           <AiReport
             insight={analyzing ? null : insight}
@@ -299,15 +289,11 @@ export function Dashboard() {
             nextInSeconds={analyzing ? null : nextIn}
             intervalSeconds={intervalSeconds}
           />
-          <div className="news-band">
-            <NewsList
-              title="Tin mới nhất"
-              articles={view.news_3d}
-              empty="Chưa có tin trong 3 ngày. Bấm Cập nhật tin."
-            />
-          </div>
+
         </>
       ) : null}
-    </main>
+      </main>
+      <footer className="site-footer"><span>Vàng · XAUUSD</span><span>Phân tích thị trường & kế hoạch giao dịch</span></footer>
+    </div>
   );
 }

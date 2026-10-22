@@ -13,7 +13,7 @@ export function TradeTicket({ plan, aiAction }: TradeTicketProps) {
 
   return (
     <section className={`ticket action-${plan.action}`}>
-      <p className="eyebrow">Quyết định · H1 · {plan.market_state}</p>
+      <p className="eyebrow">Kế hoạch giao dịch · H1 · {plan.market_state}</p>
       <div className="decision" role="group" aria-label="Quyết định giao dịch">
         <div className={plan.action === "buy" ? "choice on buy" : "choice"}>Mua</div>
         <div className={plan.action === "sell" ? "choice on sell" : "choice"}>Bán</div>
@@ -57,15 +57,15 @@ export function TradeTicket({ plan, aiAction }: TradeTicketProps) {
           <dd>{plan.lean_label}</dd>
         </div>
         <div>
-          <dt>Lời so với lỗ</dt>
+          <dt>R:R sau spread</dt>
           <dd>{times(plan.reward_risk_after_spread)}</dd>
         </div>
         <div>
-          <dt>Cắt lỗ cách giá</dt>
+          <dt>Khoảng cách SL</dt>
           <dd>{money(plan.stop_distance)}</dd>
         </div>
         <div>
-          <dt>Chốt lời cách giá</dt>
+          <dt>Khoảng cách TP</dt>
           <dd>{money(plan.take_distance)}</dd>
         </div>
       </dl> : null}
@@ -83,7 +83,7 @@ export function TradeTicket({ plan, aiAction }: TradeTicketProps) {
               <p className="eyebrow">Liquidity sweep · H1</p>
               <h3>Kịch bản chờ xác nhận</h3>
             </div>
-            <span>Chưa phải lệnh</span>
+            <span>Chờ xác nhận</span>
           </div>
           <div className="watchlist-grid">
             {plan.watchlist.map((zone) => (

@@ -43,7 +43,7 @@ export function originLabel(origin: string): string {
     case "metals_dev":
       return "metals.dev";
     case "synthetic":
-      return "Giá nội bộ";
+      return "Giá mô phỏng";
     case "seed":
       return "Giá khởi tạo";
     default:

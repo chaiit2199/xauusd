@@ -1,5 +1,6 @@
 defmodule GoldBackend.Services.TelegramNotifier do
   require Logger
+  alias GoldBackend.Services.AiDecision
 
   def configuration_status do
     config = Application.get_env(:gold_backend, :telegram, [])
@@ -31,7 +32,8 @@ defmodule GoldBackend.Services.TelegramNotifier do
 
   def notify(%{cfd_plan: %{action: action}} = snapshot, opts)
       when action in ["buy", "sell"] do
-    with :ok <- validate_config() do
+    with :ok <- validate_insight(snapshot),
+         :ok <- validate_config() do
       config = Application.get_env(:gold_backend, :telegram, [])
       token = config |> Keyword.fetch!(:bot_token) |> String.trim()
       chat = config |> Keyword.fetch!(:chat_id) |> String.trim()
@@ -77,6 +79,13 @@ defmodule GoldBackend.Services.TelegramNotifier do
   end
 
   def notify(_, _), do: {:error, "Snapshot không hợp lệ để gửi Telegram."}
+
+  defp validate_insight(snapshot) do
+    case AiDecision.validate_reason(Map.get(snapshot, :ai_insight)) do
+      {:ok, _} -> :ok
+      {:error, reason} -> failure("Không gửi nhận định AI không hợp lệ: " <> reason)
+    end
+  end
 
   defp present?(value), do: is_binary(value) and String.trim(value) != ""
 

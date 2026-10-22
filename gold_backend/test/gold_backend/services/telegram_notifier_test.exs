@@ -6,7 +6,8 @@ defmodule GoldBackend.Services.TelegramNotifierTest do
   @snapshot %{
     cfd_plan: %{action: "buy", entry: 2000, take_profit: 2020, stop_loss: 1990},
     ai_error: nil,
-    ai_insight: "Giá nằm trên SMA20, động lượng tăng."
+    ai_insight:
+      "Giá nằm trên SMA20, động lượng tăng. Chờ xác nhận trước khi mở vị thế và theo dõi rủi ro đảo chiều do tin kinh tế."
   }
 
   setup do

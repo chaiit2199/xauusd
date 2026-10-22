@@ -36,24 +36,24 @@ export function AiReport({
   return (
     <section className="panel ai-panel">
       <div className="panel-head">
-        <h2>Nhận định H1 · {cadence} phút</h2>
+        <h2>Nhận định AI · H1 · {cadence} phút</h2>
         <p>
           {pending
-            ? `Đang soạn từ giá + chỉ báo + tin… ${elapsed}s`
+            ? `Đang phân tích giá, chỉ báo và tin tức… ${elapsed} giây`
             : cachedAt
               ? `Cập nhật lúc ${when(cachedAt)}${
                   nextInSeconds != null && nextInSeconds > 0
-                    ? ` · lần sau ~${formatCountdown(nextInSeconds)}`
+                    ? ` · cập nhật sau khoảng ${formatCountdown(nextInSeconds)}`
                     : ""
                 }`
-              : `Tự chạy mỗi ${cadence} phút theo data và tin hiện có`}
+              : `Tự động cập nhật mỗi ${cadence} phút theo dữ liệu thị trường`}
         </p>
       </div>
 
       {newsTone ? <p className="ai-meta">{newsTone}</p> : null}
 
       {pending ? (
-        <p className="empty">Đang soạn diễn giải. Đã {elapsed} giây.</p>
+        <p className="empty">Đang tổng hợp nhận định thị trường · {elapsed} giây.</p>
       ) : null}
 
       {error ? <p className="ai-error">{error}</p> : null}
@@ -62,9 +62,8 @@ export function AiReport({
 
       {!pending && !error && !insight ? (
         <p className="empty">
-          Đang chờ chu kỳ nhận định đầu tiên (backend tự chạy sau vài giây).
-          Phiếu lệnh phía trên là quyết định; phần này giải thích bằng số liệu
-          và tin.
+          Đang chờ nhận định đầu tiên. Phân tích sẽ tự động cập nhật
+          theo giá, chỉ báo kỹ thuật và tin tức.
         </p>
       ) : null}
     </section>
@@ -74,6 +73,6 @@ export function AiReport({
 function formatCountdown(seconds: number) {
   const m = Math.floor(seconds / 60);
   const s = seconds % 60;
-  if (m <= 0) return `${s}s`;
-  return `${m}m${s.toString().padStart(2, "0")}s`;
+  if (m <= 0) return `${s} giây`;
+  return `${m} phút ${s.toString().padStart(2, "0")} giây`;
 }

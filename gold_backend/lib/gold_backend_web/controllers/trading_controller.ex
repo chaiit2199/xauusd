@@ -6,6 +6,7 @@ defmodule GoldBackendWeb.TradingController do
   alias GoldBackend.Repo
 
   alias GoldBackend.Services.{
+    AiDecision,
     EconomicCalendar,
     Indicators,
     NewsBias,
@@ -89,6 +90,16 @@ defmodule GoldBackendWeb.TradingController do
   end
 
   def analysis_snapshot(context, action, insight, error) do
+    {action, insight, error} =
+      if is_nil(error) do
+        case AiDecision.parse(%{"action" => to_string(action), "reason" => insight}) do
+          {:ok, valid_action, valid_reason} -> {valid_action, valid_reason, nil}
+          {:error, reason} -> {:wait, "Không có quyết định AI hợp lệ; tiếp tục theo dõi.", reason}
+        end
+      else
+        {:wait, "Không có quyết định AI hợp lệ; tiếp tục theo dõi.", error}
+      end
+
     plan =
       TradePlan.build(context.indicators, context.plan.entry,
         ai_action: action,

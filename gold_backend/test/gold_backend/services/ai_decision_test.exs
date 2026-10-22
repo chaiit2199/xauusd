@@ -6,7 +6,8 @@ defmodule GoldBackend.Services.AiDecisionTest do
     assert {:ok, :buy, _reason} =
              AiDecision.parse(%{
                "action" => "buy",
-               "reason" => String.duplicate("Xu hướng tăng, giá nằm trên đường trung bình. ", 3)
+               "reason" =>
+                 "Xu hướng tăng, giá nằm trên đường trung bình với động lượng tích cực. Chờ xác nhận và theo dõi rủi ro từ tin kinh tế trước khi mua."
              })
 
     assert {:error, _} = AiDecision.parse(%{"action" => "hold", "reason" => "x"})
@@ -34,7 +35,8 @@ defmodule GoldBackend.Services.AiDecisionTest do
         response:
           Jason.encode!(%{
             action: "sell",
-            reason: String.duplicate("Xu hướng giảm, giá nằm dưới đường trung bình. ", 3)
+            reason:
+              "Xu hướng giảm, giá nằm dưới đường trung bình với động lượng yếu. Chờ xác nhận và theo dõi rủi ro từ tin kinh tế trước khi bán."
           })
       })
 
@@ -46,7 +48,8 @@ defmodule GoldBackend.Services.AiDecisionTest do
     valid =
       Jason.encode!(%{
         action: "wait",
-        reason: String.duplicate("Chờ xác nhận xu hướng, chưa giao dịch khi tin trái chiều. ", 3)
+        reason:
+          "Chờ xác nhận xu hướng, chưa giao dịch khi tin trái chiều. Giá và động lượng chưa đồng thuận nên cần theo dõi thêm trước khi mở vị thế."
       })
 
     for content <- ["```json\n#{valid}\n```", "<think>English internal text</think>\n#{valid}"] do

@@ -12,6 +12,7 @@ export type Article = {
   url: string;
   source: string;
   published_at: string | null;
+  impact?: "High" | "Medium" | "Low" | null;
 };
 
 export type CfdPlan = {

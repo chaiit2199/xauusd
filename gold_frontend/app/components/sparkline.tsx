@@ -24,7 +24,7 @@ export function Sparkline({ values }: SparklineProps) {
   const lastY = height - ((values[values.length - 1] - min) / span) * (height - 16) - 8;
 
   return (
-    <svg className="spark" viewBox={`0 0 ${width} ${height}`} role="img" aria-label="Biểu đồ giá 5 ngày">
+    <svg className="spark" viewBox={`0 0 ${width} ${height}`} role="img" aria-label="Biểu đồ các mẫu giá gần nhất">
       <path d={`${line} L${width} ${height} L0 ${height} Z`} className={rising ? "spark-fill up" : "spark-fill down"} />
       <path d={line} className={rising ? "spark-line up" : "spark-line down"} />
       <circle cx={lastX} cy={lastY} r="4.5" className={rising ? "spark-dot up" : "spark-dot down"} />
