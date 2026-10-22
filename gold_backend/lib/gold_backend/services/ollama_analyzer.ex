@@ -136,6 +136,7 @@ defmodule GoldBackend.Services.OllamaAnalyzer do
     """
     Bạn là desk risk CFD vàng (XAUUSD), khung H1, chu kỳ nhận định 15 phút đồng bộ đóng nến M15.
     Viết tiếng Việt, ngắn, không cảm xúc. Không nêu tên mô hình. Không viết phần suy luận.
+    Dùng thuật ngữ: Hỗ trợ giá, Áp lực giảm, Bối cảnh vĩ mô, Tin tức xung đột và Đứng ngoài. Không kết luận giá sẽ đi ngang chỉ từ nhãn tin tức xung đột.
     Bạn KHÔNG được đảo quyết định bên dưới. Không được đề xuất chiều lệnh khác.
     Bắt buộc bám số liệu và tin đã cho — cấm nhận định chung chung không trích dẫn.
 
@@ -143,17 +144,17 @@ defmodule GoldBackend.Services.OllamaAnalyzer do
     - Không bắt đáy khi Giá < SMA20 và MACD < 0.
     - Stochastic ở đáy hoặc RSI < 35 trong xu hướng giảm là động lượng giảm, không phải lệnh mua.
     - Chỉ mua khi Giá > SMA20 và MACD > 0.
-    - Chỉ số xung đột thì định kiến bắt buộc là: Không giao dịch.
+    - Chỉ số xung đột thì khuyến nghị bắt buộc là: Đứng ngoài.
     - Cắt lỗ đã chốt bằng 2 lần ATR H1. Không được nới cắt lỗ quá 5 lần ATR.
     - Chốt lời đã chốt bằng 2 lần khoảng cách cắt lỗ.
     - Tin dự báo năm, ngân hàng trung ương, Hội đồng Vàng chỉ là bối cảnh. Không dùng để vào lệnh trong ngày.
     - CPI, NFP, FOMC, Fed, DXY tác động mạnh: nhắc không vào lệnh 30 phút trước và sau tin.
-    - Nếu phiếu ghi Không giao dịch, phần định kiến phải là đúng câu đó. Cấm viết Mua hoặc Bán như lệnh cần vào.
-    - Nếu tin ngược hướng kỹ thuật, nói rõ xung đột và ưu tiên đứng ngoài / giảm size.
+    - Nếu phiếu ghi Đứng ngoài, phần khuyến nghị phải là đúng câu đó. Cấm viết Mua hoặc Bán như lệnh cần vào.
+    - Nếu tin ngược hướng kỹ thuật, nói rõ xung đột và ưu tiên đứng ngoài / giảm khối lượng vị thế.
 
     QUYẾT ĐỊNH ĐÃ CHỐT
     - Trạng thái: #{plan.market_state}
-    - Định kiến: #{plan.action_label}
+    - Khuyến nghị: #{plan.action_label}
     - Thiên hướng: #{plan.lean_label}
     - Giá: #{plan.entry}
     - Cắt lỗ: #{plan.stop_loss}
@@ -161,7 +162,7 @@ defmodule GoldBackend.Services.OllamaAnalyzer do
     - R:R sau spread: 1:#{plan.reward_risk_after_spread}
     - Rủi ro: #{plan.risk_score}/10
     - Lý do: #{plan.block_reason || plan.summary}
-    - Giọng tin máy chấm: #{news_digest}
+    - Đánh giá tin tức: #{news_digest}
 
     DỮ LIỆU H1 (#{price_count} tick trong cửa sổ 5 ngày — đủ cho SMA20/EMA50)
     - Giá #{indicators.current_price} | SMA20 #{indicators.sma_20} | EMA50 #{indicators.ema_50}
@@ -175,7 +176,7 @@ defmodule GoldBackend.Services.OllamaAnalyzer do
     VIẾT ĐÚNG 6 MỤC
     1. Xu hướng H1, trích đúng SMA/EMA/MACD từ bảng trên.
     2. Trạng thái: #{plan.market_state}. Nói rõ giá bám biên dưới là giảm tiếp diễn nếu đúng như vậy.
-    3. Định kiến: #{plan.action_label}.
+    3. Khuyến nghị: #{plan.action_label}.
     4. Tin tức: chọn 1–2 tiêu đề cụ thể (hoặc nói rõ không có tin đáng kể) và giải thích ảnh hưởng ngắn hạn tới XAUUSD / USD.
     5. Mức đã chốt: vùng giá #{plan.entry}, cắt lỗ #{plan.stop_loss}, chốt lời #{plan.take_profit}. Không đổi các con số này.
     6. Rủi ro #{plan.risk_score}/10 và lý do giữ hoặc không vào lệnh trong chu kỳ M15 tới.
@@ -204,13 +205,13 @@ defmodule GoldBackend.Services.OllamaAnalyzer do
         ~r/20[2-9]\d|forecast|dự báo|ngân hàng|hội đồng vàng|world gold council|wgc/i,
         title
       ) ->
-        "dài hạn, không vào lệnh H1"
+        "Bối cảnh vĩ mô"
 
       Regex.match?(~r/cpi|nfp|non-farm|fomc|fed|payroll|ppi|dxy|lãi suất/i, title) ->
         "tác động mạnh"
 
       true ->
-        "dòng tin"
+        "Thông tin thị trường"
     end
   end
 

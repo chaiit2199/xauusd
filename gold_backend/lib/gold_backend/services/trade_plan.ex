@@ -499,7 +499,7 @@ defmodule GoldBackend.Services.TradePlan do
 
   defp action_label(:buy), do: "Mua"
   defp action_label(:sell), do: "Bán"
-  defp action_label(:wait), do: "Không giao dịch"
+  defp action_label(:wait), do: "Đứng ngoài"
 
   defp lean_label(:buy), do: "Nghiêng lên"
   defp lean_label(:sell), do: "Nghiêng xuống"

@@ -45,6 +45,7 @@ defmodule GoldBackend.Services.AiDecision do
     Với sweep + pinbar M15 đã xác nhận, vùng sweep thay cho yêu cầu gần SMA20/vùng retest; không tự thêm lại yêu cầu này. Các điều kiện còn lại trong entry_guard vẫn bắt buộc.
     Chỉ trả JSON {"action":"buy|sell|wait","reason":"nhận định bằng tiếng Việt"}.
     Reason phải bằng tiếng Việt có dấu, khoảng 100–140 từ, chia 4 ý ngắn: (1) xu hướng H1 với giá và các chỉ báo chính, (2) kịch bản và điều kiện vô hiệu, (3) tác động của tin cụ thể hoặc nói thiếu dữ liệu, (4) lý do chọn action và rủi ro. Dùng số liệu đã cho, không bịa số hoặc sự kiện. Không chép tiêu đề tiếng Anh, không đổi action trong giải thích.
+    Thuật ngữ thống nhất: Hỗ trợ giá, Áp lực giảm, Bối cảnh vĩ mô, Tin tức xung đột; wait diễn đạt là Đứng ngoài. Chỉ gọi tin tức xung đột khi có cả yếu tố hỗ trợ và áp lực giảm; không suy ra giá chắc chắn đi ngang hay đảo chiều từ nhãn tin tức.
     Mỗi ý chỉ viết một lần. Không kéo dài bằng cách lặp câu hoặc cụm từ. Chỉ giữ tên chỉ báo, mã tài sản và chữ viết tắt; diễn giải còn lại bằng tiếng Việt rõ nghĩa.
     Dữ liệu: #{Jason.encode!(input)}
     """

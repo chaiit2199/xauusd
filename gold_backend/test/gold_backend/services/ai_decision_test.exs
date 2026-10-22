@@ -49,7 +49,7 @@ defmodule GoldBackend.Services.AiDecisionTest do
       Jason.encode!(%{
         action: "wait",
         reason:
-          "Chờ xác nhận xu hướng, chưa giao dịch khi tin trái chiều. Giá và động lượng chưa đồng thuận nên cần theo dõi thêm trước khi mở vị thế."
+          "Chờ xác nhận xu hướng, chưa giao dịch khi tin tức xung đột. Giá và động lượng chưa đồng thuận nên cần theo dõi thêm trước khi mở vị thế."
       })
 
     for content <- ["```json\n#{valid}\n```", "<think>English internal text</think>\n#{valid}"] do
@@ -73,7 +73,7 @@ defmodule GoldBackend.Services.AiDecisionTest do
     }
 
     message = TelegramNotifier.format_message(snapshot)
-    assert message =~ "Khuyến nghị: Không giao dịch"
+    assert message =~ "Khuyến nghị: Đứng ngoài"
     assert message =~ "Chưa đủ tín hiệu"
     refute message =~ "SL:"
   end

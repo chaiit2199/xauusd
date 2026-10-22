@@ -3,6 +3,26 @@ defmodule GoldBackend.Services.NewsBiasTest do
 
   alias GoldBackend.Services.NewsBias
 
+  test "one-sided news is not labeled conflicting, even with only one headline" do
+    for {title, tone, label} <- [
+          {"Gold rises on safe-haven demand", :gold_bullish, "Hỗ trợ giá"},
+          {"Gold falls on higher yields", :gold_bearish, "Áp lực giảm"}
+        ] do
+      result = NewsBias.assess([%{title: title, source: "Test"}])
+      assert result.tone == tone
+      assert result.tone_label == label
+    end
+
+    result =
+      NewsBias.assess([
+        %{title: "Gold rises on safe-haven demand", source: "Test"},
+        %{title: "Gold falls on higher yields", source: "Test"}
+      ])
+
+    assert result.tone == :mixed
+    assert result.tone_label == "Tin tức xung đột"
+  end
+
   test "scores bullish gold headlines" do
     bias =
       NewsBias.assess([
@@ -12,7 +32,7 @@ defmodule GoldBackend.Services.NewsBiasTest do
 
     assert bias.tone == :gold_bullish
     assert bias.bullish >= 2
-    assert bias.digest =~ "ủng hộ vàng"
+    assert bias.digest =~ "Hỗ trợ giá"
   end
 
   test "marks high-impact USD prints without treating WGC forecasts as trade fuel" do
@@ -39,7 +59,7 @@ defmodule GoldBackend.Services.NewsBiasTest do
     assert bias.high_impact
     assert bias.trade_block
     assert Enum.any?(bias.headlines, &String.contains?(&1, "tác động mạnh"))
-    assert Enum.any?(bias.headlines, &String.contains?(&1, "dài hạn"))
+    assert Enum.any?(bias.headlines, &String.contains?(&1, "Bối cảnh vĩ mô"))
   end
 
   test "old high-impact headlines remain context but no longer lock trading" do

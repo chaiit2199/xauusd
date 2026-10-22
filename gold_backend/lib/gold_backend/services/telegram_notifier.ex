@@ -120,7 +120,7 @@ defmodule GoldBackend.Services.TelegramNotifier do
       case plan.action do
         "buy" -> "Mua"
         "sell" -> "Bán"
-        "wait" -> "Không giao dịch"
+        "wait" -> "Đứng ngoài"
       end
 
     levels =

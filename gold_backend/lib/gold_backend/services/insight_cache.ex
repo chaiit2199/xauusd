@@ -65,7 +65,7 @@ defmodule GoldBackend.Services.InsightCache do
       cfd_plan:
         Map.merge(data.cfd_plan, %{
           action: "wait",
-          action_label: "Không giao dịch",
+          action_label: "Đứng ngoài",
           block_reason: reason,
           summary: reason
         })

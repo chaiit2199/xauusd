@@ -1,5 +1,23 @@
 # Ollama timeout và nhận định tiếng Việt
 
+Giao diện tập trung trên một trang: bảng giá → nhận định AI → tín hiệu
+Mua/Bán/Đứng ngoài → dữ liệu kỹ thuật mở rộng và tin tức. Không còn thanh
+điều hướng ba trang, công cụ lập kế hoạch hoặc kịch bản lệnh chờ trên giao diện.
+Các mức rủi ro và bộ kiểm tra trong backend vẫn phục vụ phân tích và Telegram.
+
+Thuật ngữ dùng chung trong nhãn tin tức, prompt AI và thông báo:
+
+| Ý nghĩa | Cách diễn đạt |
+| --- | --- |
+| Yếu tố có tác động tích cực đến giá | Hỗ trợ giá |
+| Yếu tố gây sức ép lên giá | Áp lực giảm |
+| Thông tin nền, triển vọng kinh tế | Bối cảnh vĩ mô |
+| Có hai chiều tác động, chưa bên nào chiếm ưu thế | Tin tức xung đột |
+| Chưa đủ điều kiện mở vị thế (`wait`) | Đứng ngoài |
+
+Nhãn tin tức phản ánh phân loại nội dung, không khẳng định giá sẽ đi ngang
+hoặc đảo chiều. Tin chỉ có một chiều tác động không mang nhãn xung đột.
+
 Giữ nguyên `OLLAMA_MODEL` hiện tại; mặc định vẫn là `deepseek-r1:1.5b`.
 Cả phân tích và sửa tiếng Việt dùng cùng model. Không cần tải model khác.
 
@@ -10,7 +28,7 @@ vụ đang chạy, hệ thống không mở thêm lượt phân tích tự độ
 
 Prompt yêu cầu 4 ý ngắn thay cho ít nhất 4 đoạn, chỉ gửi 6 tiêu đề mới nhất và
 ưu tiên bản dịch tiêu đề để giảm dữ liệu trùng lặp. Chỉ báo, lịch sự kiện và bản
-chấm tin tổng hợp vẫn được gửi. Với DeepSeek-R1, hướng dẫn nằm trong user prompt
+đánh giá tin tức tổng hợp vẫn được gửi. Với DeepSeek-R1, hướng dẫn nằm trong user prompt
 và temperature là 0.6 theo
 [khuyến nghị của DeepSeek](https://github.com/deepseek-ai/DeepSeek-R1#usage-recommendations).
 
@@ -214,5 +232,5 @@ docker exec xauusd-api-1 /app/bin/gold_backend rpc \
 
 Lệnh này vẫn thực hiện các bước chuẩn bị dữ liệu/dịch tiêu đề thường lệ. Kết quả
 thành công là `{:ok, action, "nhận định tiếng Việt..."}`; `action` có thể là
-`:buy`, `:sell` hoặc `:wait`. `Tin trái chiều` chỉ là nhãn chấm tin, không phải lỗi
+`:buy`, `:sell` hoặc `:wait`. `Tin tức xung đột` chỉ là nhãn phân loại tin tức, không phải lỗi
 tiếng Việt. Telegram chỉ gửi Buy/Sell cuối cùng, không gửi khi chờ hoặc AI lỗi.

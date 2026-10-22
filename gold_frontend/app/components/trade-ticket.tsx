@@ -1,5 +1,4 @@
 import type { CfdPlan } from "../../lib/types";
-import { money } from "../../lib/format";
 
 type TradeTicketProps = {
   plan: CfdPlan;
@@ -7,114 +6,33 @@ type TradeTicketProps = {
 };
 
 export function TradeTicket({ plan, aiAction }: TradeTicketProps) {
-  const tone = plan.risk_score >= 7 ? "high" : plan.risk_score >= 4 ? "mid" : "low";
-
-  const order = plan.action !== "wait";
+  const adjusted = aiAction && aiAction !== plan.action;
 
   return (
-    <section className={`ticket action-${plan.action}`}>
-      <p className="eyebrow">Kế hoạch giao dịch · {plan.timeframe ?? "H1"} · {plan.market_state}</p>
-      <div className="decision" role="group" aria-label="Quyết định giao dịch">
-        <div className={plan.action === "buy" ? "choice on buy" : "choice"}>Mua</div>
-        <div className={plan.action === "sell" ? "choice on sell" : "choice"}>Bán</div>
-        <div className={plan.action === "wait" ? "choice on wait" : "choice"}>Không giao dịch</div>
+    <section className={`ticket action-${plan.action}`} aria-labelledby="decision-title">
+      <div className="panel-head">
+        <h2 id="decision-title">Tín hiệu giao dịch</h2>
+        <p>{plan.timeframe ?? "H1"} · {plan.market_state}</p>
       </div>
-      <p className="ticket-summary">AI đề xuất: {aiAction ? actionLabel(aiAction) : "Chưa có quyết định AI hợp lệ"}{aiAction && aiAction !== plan.action ? ` · Đã chuyển sang ${actionLabel(plan.action)}: ${plan.block_reason}` : ""}</p>
-      {plan.news_tone ? <p className="ticket-news">{plan.news_tone}</p> : null}
-      <div className="ticket-top">
-        <p className="ticket-summary">{plan.summary}</p>
-        <div className={`risk risk-${tone}`}>
-          <p>Rủi ro</p>
-          <strong>
-            {plan.risk_score}
-            <span>/10</span>
-          </strong>
-          <p>{plan.risk_label}</p>
-        </div>
-      </div>
-
-      {plan.entry_guard?.blocked ? <details className="calculator-notes">
-        <summary>Điều kiện vào lệnh · {plan.entry_guard.reasons.length} điều kiện chưa đạt</summary>
-        <ul className="ticket-notes">{plan.entry_guard.reasons.map((reason) => <li key={reason}>{reason}</li>)}</ul>
-      </details> : null}
-
-      {order ? <div className="levels">
-        <article className="level level-entry">
-          <p>Điểm vào</p>
-          <strong>{money(plan.entry)}</strong>
-          <span>Giá vào lệnh</span>
-        </article>
-        <article className="level level-sl">
-          <p>Cắt lỗ · SL</p>
-          <strong>{money(plan.stop_loss)}</strong>
-          <span>Cách giá {money(plan.stop_distance)}</span>
-        </article>
-        <article className="level level-tp">
-          <p>Chốt lời · TP</p>
-          <strong>{money(plan.take_profit)}</strong>
-          <span>Cách giá {money(plan.take_distance)}</span>
-        </article>
-      </div> : null}
-
-      {order ? <dl className="ticket-stats">
-        <div>
-          <dt>Hướng giá</dt>
-          <dd>{plan.lean_label}</dd>
-        </div>
-        <div>
-          <dt>R:R sau spread</dt>
-          <dd>{times(plan.reward_risk_after_spread)}</dd>
-        </div>
-        <div>
-          <dt>Khoảng cách SL</dt>
-          <dd>{money(plan.stop_distance)}</dd>
-        </div>
-        <div>
-          <dt>Khoảng cách TP</dt>
-          <dd>{money(plan.take_distance)}</dd>
-        </div>
-      </dl> : null}
-
-      {order ? <ul className="ticket-notes">
-        {plan.notes.map((note) => (
-          <li key={note}>{note}</li>
+      <div className="decision" role="group" aria-label={`Khuyến nghị: ${actionLabel(plan.action)}`}>
+        {(["buy", "sell", "wait"] as const).map((action) => (
+          <div key={action} className={`choice${plan.action === action ? ` on ${action}` : ""}`} aria-current={plan.action === action ? "true" : undefined}>
+            {actionLabel(action)}
+          </div>
         ))}
-      </ul> : null}
-
-      {plan.watchlist && plan.watchlist.length > 0 ? (
-        <section className="watchlist" aria-label="Kịch bản chờ xác nhận">
-          <div className="watchlist-head">
-            <div>
-              <p className="eyebrow">Hồi giá / Retest · H1 → M15</p>
-              <h3>Kịch bản chờ xác nhận</h3>
-            </div>
-            <span>Chờ xác nhận</span>
-          </div>
-          <div className="watchlist-grid">
-            {plan.watchlist.map((zone) => (
-              <article className={`watch-zone ${zone.side}`} key={zone.id}>
-                <p className="watch-priority">{zone.priority}</p>
-                <h4>{zone.title}</h4>
-                <p className="watch-condition">{zone.condition}</p>
-                <dl>
-                  <div><dt>Vùng theo dõi</dt><dd>{money(zone.entry_low)} – {money(zone.entry_high)}</dd></div>
-                  <div><dt>SL tham chiếu</dt><dd>{money(zone.stop_loss)}</dd></div>
-                  <div><dt>TP tham chiếu</dt><dd>{money(zone.take_profit)}</dd></div>
-                  <div><dt>R:R ước tính</dt><dd>1 : {zone.reward_risk.toFixed(2)}</dd></div>
-                </dl>
-              </article>
-            ))}
-          </div>
-        </section>
+      </div>
+      <p className="ticket-summary">{plan.block_reason || plan.summary}</p>
+      {adjusted ? <p className="basis">Đề xuất AI: {actionLabel(aiAction)} · Quyết định sau kiểm tra: {actionLabel(plan.action)}.</p> : null}
+      {plan.entry_guard?.blocked ? (
+        <details className="analysis-details">
+          <summary>Điều kiện chưa đạt · {plan.entry_guard.reasons.length}</summary>
+          <ul className="ticket-notes">{plan.entry_guard.reasons.map((reason) => <li key={reason}>{reason}</li>)}</ul>
+        </details>
       ) : null}
     </section>
   );
 }
 
-function times(value: number) {
-  return `${value.toFixed(2).replace(".", ",")} lần`;
-}
-
 function actionLabel(action: CfdPlan["action"]) {
-  return action === "buy" ? "Mua" : action === "sell" ? "Bán" : "Không giao dịch";
+  return action === "buy" ? "Mua" : action === "sell" ? "Bán" : "Đứng ngoài";
 }

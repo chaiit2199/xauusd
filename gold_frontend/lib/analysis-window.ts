@@ -14,7 +14,7 @@ export function expireAnalysis(board: MarketBoard, now: number): MarketBoard {
     cfd_plan: {
       ...board.cfd_plan,
       action: "wait",
-      action_label: "Không giao dịch",
+      action_label: "Đứng ngoài",
       block_reason: reason,
       summary: reason,
     },

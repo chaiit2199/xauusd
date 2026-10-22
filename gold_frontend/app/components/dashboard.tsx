@@ -1,7 +1,6 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
-import Link from "next/link";
 import { analyzeMarket, crawlNews, fetchOverview } from "../../lib/api";
 import { expireAnalysis } from "../../lib/analysis-window";
 import { when } from "../../lib/format";
@@ -11,14 +10,12 @@ import { IndicatorGrid } from "./indicator-grid";
 import { NewsList } from "./news-list";
 import { MarketOverview } from "./market-overview";
 import { TradeTicket } from "./trade-ticket";
-import { SiteHeader, type DeskPage } from "./site-header";
-import { LotCalculator } from "./lot-calculator";
-import { MarketContext } from "./market-context";
+import { SiteHeader } from "./site-header";
 import { EconomicEvents } from "./economic-events";
 
 const BOARD_MS = 60_000;
 
-export function Dashboard({ page = "overview", initialSide = "buy" }: { page?: DeskPage; initialSide?: "buy" | "sell" }) {
+export function Dashboard() {
   const [crawling, setCrawling] = useState(false);
   const [analyzing, setAnalyzing] = useState(false);
   const [loadingBoard, setLoadingBoard] = useState(true);
@@ -168,7 +165,7 @@ export function Dashboard({ page = "overview", initialSide = "buy" }: { page?: D
 
   return (
     <div className="page">
-      <SiteHeader active={page}>
+      <SiteHeader>
           <button
             type="button"
             className="primary"
@@ -192,8 +189,8 @@ export function Dashboard({ page = "overview", initialSide = "buy" }: { page?: D
       <main id="content">
         <div className="section-intro">
           <p className="eyebrow">XAUUSD · CFD</p>
-          <h1>{page === "overview" ? "Thị trường vàng" : page === "trading" ? "Kế hoạch giao dịch" : "Tin tức & phân tích"}</h1>
-          <p>{page === "overview" ? "Giá vàng, tín hiệu và thông tin thị trường." : page === "trading" ? "H1 định hướng · M15 xác nhận điểm vào sau khi đóng nến." : "Theo dõi tin kinh tế và các sự kiện ảnh hưởng đến vàng."}</p>
+          <h1>Thị trường vàng</h1>
+          <p>Giá vàng, nhận định AI và tín hiệu XAUUSD.</p>
         </div>
 
       {boardError ? <p className="banner bad" role="alert">Chưa thể cập nhật bảng giá. {view ? "Đang hiển thị báo giá gần nhất. " : ""}{boardError}</p> : null}
@@ -205,28 +202,7 @@ export function Dashboard({ page = "overview", initialSide = "buy" }: { page?: D
         </p>
       ) : null}
 
-      {crawl ? (
-        <ul className="source-row">
-          {crawl.sources.map((source) => (
-            <li
-              key={source.source}
-              className={source.status === "ok" ? "ok" : "bad"}
-            >
-              <strong>{source.source}</strong>
-              <span>
-                {source.status === "ok"
-                  ? `Lưu ${source.saved}/${source.found}`
-                  : source.error || "Lỗi"}
-              </span>
-            </li>
-          ))}
-        </ul>
-      ) : null}
-
-      {page === "trading" ? <LotCalculator initialSide={initialSide} currentPrice={view && !["seed", "synthetic"].includes(view.price_origin) ? view.current_price : undefined} /> : null}
-
-      {loadingBoard && !view && page === "news" ? <p className="banner" role="status">Đang cập nhật tin thị trường…</p> : null}
-      {loadingBoard && !view && page !== "news" ? (
+      {loadingBoard && !view ? (
         <section className="hero loading-quote" aria-busy="true" aria-label="Bảng giá XAUUSD">
           <p className="eyebrow">XAUUSD · USD / oz</p>
           <p className="price" aria-hidden="true">—</p>
@@ -236,17 +212,9 @@ export function Dashboard({ page = "overview", initialSide = "buy" }: { page?: D
 
       {view ? (
         <>
-          {page !== "news" ? <MarketOverview board={view} /> : null}
-          {page === "overview" ? <>
-            <MarketContext />
-            <div className="trade-shortcuts">
-              <span>Lập kế hoạch XAUUSD</span>
-              <Link className="trade-link buy" href="/giao-dich?side=buy">Mua</Link>
-              <Link className="trade-link sell" href="/giao-dich?side=sell">Bán</Link>
-            </div>
-          </> : null}
+          <MarketOverview board={view} />
 
-          {page !== "news" && view.warmup ? (
+          {view.warmup ? (
             <p className="banner warn">
               {view.warmup_detail ||
                 "Đang khởi tạo chỉ báo H1. Chờ đủ dữ liệu thị trường để đánh giá điều kiện giao dịch."}
@@ -255,46 +223,6 @@ export function Dashboard({ page = "overview", initialSide = "buy" }: { page?: D
                 : null}
             </p>
           ) : null}
-
-          {view.events.length > 0 ? (
-            <p className="banner warn">
-              Tin USD tác động mạnh:{" "}
-              {view.events
-                .map((event) => `${event.title} (${when(event.time)})`)
-                .join(" · ")}
-              . Không vào lệnh trong 30 phút trước và sau giờ ra tin.
-            </p>
-          ) : null}
-
-          {view.news_digest ? (
-            <p className="banner">{view.news_digest}</p>
-          ) : null}
-
-          {view.m15_setup ? <section className="panel">
-            <div className="panel-head"><h2>Xác nhận M15</h2><p>Mốc đóng nến {when(view.m15_setup.candle_closed_at)}</p></div>
-            <p className="empty">{expired ? view.ai_error : view.m15_setup.reason}</p>
-            {view.ohlc_feed ? <p className="basis">
-              Nguồn OHLC: <a href="https://gold-api.com" target="_blank" rel="noreferrer">Gold API</a>
-              {` · M15: ${view.ohlc_feed.m15_count}/${view.ohlc_feed.required} · H1: ${view.ohlc_feed.h1_count}/${view.ohlc_feed.required} nến`}
-              {view.ohlc_feed.error ? ` · ${view.ohlc_feed.error}` : null}
-            </p> : null}
-            <p className="basis">H1 định hướng · Chỉ đánh giá nến đã đóng · Mốc :00 / :15 / :30 / :45</p>
-            {view.m15_setup.divergence !== "none" ? <p className="banner warn">Phân kỳ RSI {view.m15_setup.divergence === "bearish" ? "giảm" : "tăng"} · Cảnh báo, chưa phải lệnh.</p> : null}
-          </section> : null}
-
-          {page !== "news" ? <TradeTicket plan={view.cfd_plan} aiAction={view.ai_action} /> : null}
-
-          {page === "trading" ? <IndicatorGrid indicators={view.indicators_10} alerts={view.alerts} /> : null}
-          {page === "news" ? <EconomicEvents events={view.events} /> : null}
-
-          {page !== "trading" ? <div className="news-band">
-            <NewsList
-              title="Tin mới nhất"
-              filterable={page === "news"}
-              articles={view.news_3d}
-              empty="Chưa có tin trong 3 ngày gần nhất. Chọn “Cập nhật tin” để đồng bộ."
-            />
-          </div> : null}
 
           <AiReport
             insight={analyzing || expired ? null : insight}
@@ -307,10 +235,39 @@ export function Dashboard({ page = "overview", initialSide = "buy" }: { page?: D
             intervalSeconds={intervalSeconds}
           />
 
+          <TradeTicket plan={view.cfd_plan} aiAction={view.ai_action} />
+
+          {view.m15_setup ? <details className="panel analysis-details">
+            <summary>Dữ liệu và xác nhận M15</summary>
+            <div className="panel-head"><h2>Xác nhận M15</h2><p>Mốc đóng nến {when(view.m15_setup.candle_closed_at)}</p></div>
+            <p className="empty">{expired ? view.ai_error : view.m15_setup.reason}</p>
+            {view.ohlc_feed ? <p className="basis">
+              Nguồn OHLC: <a href="https://gold-api.com" target="_blank" rel="noreferrer">Gold API</a>
+              {` · M15: ${view.ohlc_feed.m15_count}/${view.ohlc_feed.required} · H1: ${view.ohlc_feed.h1_count}/${view.ohlc_feed.required} nến`}
+              {view.ohlc_feed.error ? ` · ${view.ohlc_feed.error}` : null}
+            </p> : null}
+            <p className="basis">H1 định hướng · Chỉ đánh giá nến đã đóng · Mốc :00 / :15 / :30 / :45</p>
+            {view.m15_setup.divergence !== "none" ? <p className="banner warn">Phân kỳ RSI {view.m15_setup.divergence === "bearish" ? "giảm" : "tăng"} · Cảnh báo, chưa phải lệnh.</p> : null}
+          </details> : null}
+
+          <details className="panel analysis-details">
+            <summary>Chỉ báo kỹ thuật H1</summary>
+            <IndicatorGrid indicators={view.indicators_10} alerts={view.alerts} />
+          </details>
+          {view.events.length > 0 ? <EconomicEvents events={view.events} /> : null}
+
+          <div className="news-band">
+            <NewsList
+              title="Tin mới nhất"
+              filterable
+              articles={view.news_3d}
+              empty="Chưa có tin trong 3 ngày gần nhất. Chọn “Cập nhật tin” để đồng bộ."
+            />
+          </div>
         </>
       ) : null}
       </main>
-      <footer className="site-footer"><span>Vàng · XAUUSD</span><span>Phân tích thị trường & kế hoạch giao dịch</span></footer>
+      <footer className="site-footer"><span>Vàng · XAUUSD</span><span>Dữ liệu & phân tích thị trường</span></footer>
     </div>
   );
 }

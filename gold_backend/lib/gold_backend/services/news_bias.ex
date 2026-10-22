@@ -31,8 +31,8 @@ defmodule GoldBackend.Services.NewsBias do
 
     tone =
       cond do
-        bull > bear + 1 -> :gold_bullish
-        bear > bull + 1 -> :gold_bearish
+        bull > 0 and (bear == 0 or bull > bear + 1) -> :gold_bullish
+        bear > 0 and (bull == 0 or bear > bull + 1) -> :gold_bearish
         bull > 0 or bear > 0 -> :mixed
         true -> :neutral
       end
@@ -107,16 +107,16 @@ defmodule GoldBackend.Services.NewsBias do
 
   defp recent_article?(_, _now), do: false
 
-  defp bucket(:bullish, _), do: "ủng hộ vàng"
-  defp bucket(:bearish, _), do: "đè vàng"
-  defp bucket(:context, _), do: "dài hạn"
+  defp bucket(:bullish, _), do: "Hỗ trợ giá"
+  defp bucket(:bearish, _), do: "Áp lực giảm"
+  defp bucket(:context, _), do: "Bối cảnh vĩ mô"
   defp bucket(_, true), do: "tác động mạnh"
-  defp bucket(_, _), do: "dòng tin"
+  defp bucket(_, _), do: "Thông tin thị trường"
 
-  defp tone_label(:gold_bullish), do: "Tin nghiêng ủng hộ vàng"
-  defp tone_label(:gold_bearish), do: "Tin nghiêng đè vàng"
-  defp tone_label(:mixed), do: "Tin trái chiều"
-  defp tone_label(:neutral), do: "Tin trung tính / ít tín hiệu"
+  defp tone_label(:gold_bullish), do: "Hỗ trợ giá"
+  defp tone_label(:gold_bearish), do: "Áp lực giảm"
+  defp tone_label(:mixed), do: "Tin tức xung đột"
+  defp tone_label(:neutral), do: "Tin tức trung tính"
 
   defp digest(tone, bull, bear, high_impact, trade_block, scored) do
     top =
@@ -125,7 +125,7 @@ defmodule GoldBackend.Services.NewsBias do
       |> Enum.take(4)
       |> Enum.map_join("; ", & &1.line)
 
-    base = "#{tone_label(tone)} (ủng hộ #{bull}, đè #{bear})."
+    base = "#{tone_label(tone)} (hỗ trợ giá: #{bull}, áp lực giảm: #{bear})."
 
     impact =
       cond do
@@ -133,7 +133,7 @@ defmodule GoldBackend.Services.NewsBias do
           " Có tin USD tác động mạnh mới xuất hiện — khóa lệnh 90 phút để tránh biến động sau tin."
 
         high_impact ->
-          " Có dòng tin USD tác động mạnh nhưng đã ngoài cửa sổ khóa lệnh 90 phút."
+          " Có tin USD tác động mạnh nhưng đã ngoài cửa sổ khóa lệnh 90 phút."
 
         true ->
           ""

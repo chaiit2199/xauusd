@@ -284,24 +284,6 @@ button:focus-visible, a:focus-visible, summary:focus-visible { outline: 2px soli
 
 .ticket-notes { margin: 14px 0 0; padding-left: 18px; display: grid; gap: 6px; line-height: 1.45; }
 
-.watchlist { margin-top: 20px; padding-top: 18px; border-top: 1px solid var(--line); }
-.watchlist-head { display: flex; justify-content: space-between; align-items: flex-start; gap: 12px; }
-.watchlist-head .eyebrow { margin-bottom: 4px; }
-.watchlist h3, .watchlist h4 { margin: 0; letter-spacing: -0.025em; }
-.watchlist h3 { font-size: 20px; }
-.watchlist-head > span { color: var(--warn); border: 1px solid rgba(231, 177, 90, .35); border-radius: 999px; padding: 5px 9px; font-size: 12px; }
-.watchlist-grid { display: grid; grid-template-columns: repeat(2, 1fr); gap: 12px; margin-top: 14px; }
-.watch-zone { padding: 15px; border: 1px solid var(--line); border-radius: 14px; background: #141414; }
-.watch-zone.sell { border-top: 3px solid var(--down); }
-.watch-zone.buy { border-top: 3px solid var(--up); }
-.watch-priority { margin: 0 0 6px; color: var(--warn); font-size: 12px; font-weight: 650; text-transform: uppercase; letter-spacing: .06em; }
-.watch-zone h4 { font-size: 17px; }
-.watch-condition { margin: 8px 0 14px; min-height: 42px; font-size: 13px; line-height: 1.45; }
-.watch-zone dl { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; margin: 0; }
-.watch-zone dl div { border-top: 1px solid var(--line); padding-top: 8px; }
-.watch-zone dt { color: var(--muted); font-size: 11px; }
-.watch-zone dd { margin: 3px 0 0; font-size: 14px; font-variant-numeric: tabular-nums; }
-
 .panel { padding: 18px; }
 .panel-head { justify-content: space-between; align-items: baseline; flex-wrap: wrap; }
 .panel-head h2 { font-size: 22px; }
@@ -389,7 +371,6 @@ button:focus-visible, a:focus-visible, summary:focus-visible { outline: 2px soli
   }
   .news-list a { grid-template-columns: 1fr; gap: 4px; align-items: start; }
   .indicator-grid { grid-template-columns: 1fr 1fr; }
-  .watchlist-grid { grid-template-columns: 1fr; }
   .actions { justify-content: flex-start; }
   h1 { font-size: 24px; }
   .ticket h2 { font-size: 34px; }
@@ -405,7 +386,6 @@ button:focus-visible, a:focus-visible, summary:focus-visible { outline: 2px soli
   .level p { font-size: 10px; letter-spacing: 0; }
   .level span { font-size: 11px; }
   .risk { min-width: 0; }
-  .watchlist-head { flex-wrap: wrap; }
   .hero, .ticket, .panel { padding: 14px; }
   .actions { gap: 8px; }
   .actions button { padding: 10px 12px; font-size: 13px; }
@@ -415,10 +395,6 @@ button:focus-visible, a:focus-visible, summary:focus-visible { outline: 2px soli
 .brand img { flex-shrink: 0; }
 .brand-name { display: block; font-size: 32px; font-weight: 600; letter-spacing: -.06em; line-height: 1.15; }
 .brand-caption { display: block; color: var(--muted); font-size: 9px; letter-spacing: .16em; margin-top: 5px; }
-.desk-nav { display: flex; gap: 28px; border-bottom: 1px solid var(--line); }
-.desk-nav a { padding: 18px 0 14px; text-decoration: none; font-size: 14px; color: var(--muted); border-bottom: 2px solid transparent; }
-.desk-nav a[aria-current="page"] { color: var(--gold); border-bottom-color: var(--gold); }
-.desk-nav a:hover { color: var(--text); }
 .section-intro { padding: 28px 0 4px; }
 .section-intro h1 { font-size: 30px; line-height: 1.2; }
 .section-intro > p:last-child { color: var(--muted); font-size: 14px; line-height: 1.5; margin-bottom: 0; }
@@ -429,12 +405,6 @@ button:focus-visible, a:focus-visible, summary:focus-visible { outline: 2px soli
 .market-context span { font-size: 12px; color: var(--muted); }
 .market-context .market-symbol { color: var(--text); font-weight: 600; }
 .market-context strong { margin-left: auto; }
-.trade-shortcuts { display: flex; flex-wrap: wrap; align-items: center; gap: 10px; margin-top: 16px; }
-.trade-shortcuts > span { margin-right: auto; font-size: 14px; color: var(--muted); }
-.trade-link { padding: 10px 26px; border: 1px solid currentColor; border-radius: 8px; text-decoration: none; font-size: 14px; font-weight: 600; }
-.trade-link.buy { color: var(--up); background: rgba(120, 182, 153, .08); }
-.trade-link.sell { color: var(--down); background: rgba(216, 140, 136, .08); }
-.trade-link:hover { background: var(--card-solid); }
 .connection-label { font-size: 12px; color: var(--muted); }
 .side-picker { display: flex; gap: 8px; margin: 20px 0; }
 .side-picker button { min-width: 104px; border-radius: 8px; }
@@ -466,10 +436,14 @@ input:focus-visible, select:focus-visible { outline: 2px solid var(--gold); outl
 }
 @media (max-width: 520px) {
   .section-intro h1 { font-size: 26px; }
-  .desk-nav { gap: 24px; }
   .market-context { grid-template-columns: 1fr; }
   .calculator-fields { grid-template-columns: 1fr; }
   .event-list li { grid-template-columns: 1fr auto; gap: 8px; }
   .event-list time { grid-column: 1 / -1; }
-  .trade-shortcuts > span { flex-basis: 100%; }
 }
+
+.analysis-details { margin-top: 16px; }
+.analysis-details > summary { cursor: pointer; color: var(--muted); font-size: 14px; line-height: 1.6; }
+.analysis-details[open] > summary { margin-bottom: 16px; color: var(--text); }
+.analysis-details > .panel { padding: 0; border: 0; box-shadow: none; }
+.ticket > .ticket-summary { margin-top: 16px; }

@@ -3,7 +3,7 @@ import "./globals.css";
 
 export const metadata: Metadata = {
   title: { default: "Vàng · XAUUSD", template: "%s · Vàng" },
-  description: "Theo dõi giá vàng, phân tích thị trường và lập kế hoạch giao dịch XAUUSD.",
+  description: "Theo dõi giá vàng, nhận định AI và tín hiệu giao dịch XAUUSD.",
   icons: {
     icon: [
       { url: "/brand/favicon-32.png", sizes: "32x32", type: "image/png" },
