@@ -30,8 +30,18 @@ if [[ -z "$requested_image" ]]; then
   requested_image="${IMAGE_TAG:-}"
 fi
 
+# A server installed before .image.env was introduced can still be recreated
+# safely by reusing the exact image reference of the running API container.
+# This fallback is intentionally last so Jenkins, .image.env, and env.sh keep
+# their existing precedence.
 if [[ -z "$requested_image" ]]; then
-  echo "ERROR: Pass an image tag or deploy once to create .image.env" >&2
+  requested_image="$(
+    docker inspect --format '{{.Config.Image}}' xauusd-api-1 2>/dev/null || true
+  )"
+fi
+
+if [[ -z "$requested_image" ]]; then
+  echo "ERROR: Pass an image tag; no recorded or running API image was found" >&2
   exit 1
 fi
 
