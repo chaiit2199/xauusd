@@ -1,6 +1,9 @@
 // Empty = same origin (production nginx /api → host :5005).
-// Local .env.local: http://127.0.0.1:5005 (never :4000 — that is only inside Docker).
-export const apiBase = (process.env.NEXT_PUBLIC_API_URL ?? "").replace(/\/$/, "");
+// Local .env.local: https://api-crypto.9nine.tech (never :4000 — that is only inside Docker).
+export const apiBase = (process.env.NEXT_PUBLIC_API_URL ?? "").replace(
+  /\/$/,
+  "",
+);
 
 export function money(value: string | number): string {
   const amount = typeof value === "number" ? value : Number(value);
