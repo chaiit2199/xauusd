@@ -73,6 +73,33 @@ export function TradeTicket({ plan }: TradeTicketProps) {
           <li key={note}>{note}</li>
         ))}
       </ul> : null}
+
+      {plan.watchlist && plan.watchlist.length > 0 ? (
+        <section className="watchlist" aria-label="Kịch bản chờ xác nhận">
+          <div className="watchlist-head">
+            <div>
+              <p className="eyebrow">Liquidity sweep · H1</p>
+              <h3>Kịch bản chờ xác nhận</h3>
+            </div>
+            <span>Chưa phải lệnh</span>
+          </div>
+          <div className="watchlist-grid">
+            {plan.watchlist.map((zone) => (
+              <article className={`watch-zone ${zone.side}`} key={zone.id}>
+                <p className="watch-priority">{zone.priority}</p>
+                <h4>{zone.title}</h4>
+                <p className="watch-condition">{zone.condition}</p>
+                <dl>
+                  <div><dt>Vùng theo dõi</dt><dd>{money(zone.entry_low)} – {money(zone.entry_high)}</dd></div>
+                  <div><dt>SL tham chiếu</dt><dd>{money(zone.stop_loss)}</dd></div>
+                  <div><dt>TP tham chiếu</dt><dd>{money(zone.take_profit)}</dd></div>
+                  <div><dt>R:R ước tính</dt><dd>1 : {zone.reward_risk.toFixed(2)}</dd></div>
+                </dl>
+              </article>
+            ))}
+          </div>
+        </section>
+      ) : null}
     </section>
   );
 }

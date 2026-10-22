@@ -49,7 +49,8 @@ defmodule GoldBackend.Services.TradePlan do
       news_tone: news_tone(news_bias),
       news_digest: news_digest(news_bias),
       summary: summary(action, lean, risk_label(score), block, indicators),
-      notes: notes(indicators, lean, stop_usd, news_bias)
+      notes: notes(indicators, lean, stop_usd, news_bias),
+      watchlist: liquidity_watchlist(indicators, entry, action, lean)
     }
   end
 
@@ -72,19 +73,24 @@ defmodule GoldBackend.Services.TradePlan do
         do: "Tin gần đây: #{news_digest}",
         else: "Tin gần đây: chưa có tiêu đề đủ mạnh trong 3 ngày."
 
+    watchlist_text = watchlist_commentary(Map.get(plan, :watchlist, []))
+
     """
-    Giá đang xem: #{usd(plan.entry)} USD.
-    Quyết định: #{plan.action_label}. #{plan.block_reason || "Tín hiệu đã cùng một hướng."}
-    Giá đang #{direction_word(plan.lean)}. Trạng thái: #{plan.market_state}.
-    #{evidence}
-    #{news_line}
+    **QUYẾT ĐỊNH: #{String.upcase(plan.action_label)}** · Trạng thái: #{plan.market_state} · Rủi ro: #{plan.risk_score}/10 (#{plan.risk_label}).
 
-    #{if watch?, do: "Các mức dưới đây chỉ để xem, chưa phải lệnh cần vào.", else: "Mức lệnh:"}
-    Cắt lỗ #{usd(plan.stop_loss)} USD, nằm #{stop_side(plan.lean)} giá #{usd(plan.stop_distance)} USD.
-    Chốt lời #{usd(plan.take_profit)} USD, nằm #{take_side(plan.lean)} giá #{usd(plan.take_distance)} USD.
-    Nếu đúng hướng, tiền lời khoảng #{plan.reward_risk_after_spread} lần tiền lỗ. Phí vào lệnh tạm tính #{usd(plan.spread)} USD.
+    **1. Bức tranh H1**
+    Giá #{usd(plan.entry)} đang #{direction_word(plan.lean)}. #{evidence}
+    RSI/Stochastic quá bán trong xu hướng giảm không tự động là tín hiệu mua; đó có thể là pha chạy thanh khoản khi đà ROC vẫn âm.
 
-    Rủi ro #{plan.risk_score} trên 10, mức #{plan.risk_label}.
+    **2. Tin tức và thanh khoản**
+    #{news_line} Không mở vị thế trong 30 phút trước/sau tin USD tác động mạnh vì spread và biến động có thể quét hai đầu.
+
+    **3. Kịch bản chờ xác nhận**
+    #{if watch?, do: "Chỉ theo dõi các vùng dưới đây; chưa phải lệnh thị trường.", else: "Phiếu lệnh hiện tại vẫn là quyết định ưu tiên."}
+    #{watchlist_text}
+
+    **4. Quản trị rủi ro**
+    Không nhồi lệnh hoặc nới SL. #{if watch?, do: "Chờ nến H1 xác nhận thay vì bán đuổi/bắt đáy.", else: "SL #{usd(plan.stop_loss)}, TP #{usd(plan.take_profit)}; R:R sau spread #{plan.reward_risk_after_spread}."}
     """
     |> String.replace(~r/\n{3,}/, "\n\n")
     |> String.trim()
@@ -282,6 +288,68 @@ defmodule GoldBackend.Services.TradePlan do
       indicators.current_price <= indicators.bollinger_bands.lower + indicators.atr_14
   end
 
+  # These are observation zones, not executable orders.  They are only shown
+  # during an oversold H1 sell sweep, so the ticket itself remains the source
+  # of truth and stays at "wait" until its normal confirmation rules pass.
+  defp liquidity_watchlist(indicators, entry, :wait, :sell) do
+    if downtrend?(indicators) and indicators.rsi_14 <= 35 and indicators.stochastic_k <= 20 do
+      atr = max(indicators.atr_14, 0.5)
+      resistance_low = min(indicators.sma_20, indicators.ema_50)
+      resistance_high = max(indicators.sma_20, indicators.ema_50)
+      support = round2(entry - 4 * atr)
+      short_entry_low = round2(resistance_low - 0.6 * atr)
+      short_entry_high = round2(resistance_low)
+      short_stop = round2(resistance_high + 0.9 * atr)
+      long_entry_low = round2(support + 0.25 * atr)
+      long_entry_high = round2(support + 0.75 * atr)
+
+      [
+        %{
+          id: "short-retest",
+          side: "sell",
+          title: "Canh bán khi hồi kiểm tra kháng cự",
+          priority: "Ưu tiên",
+          condition: "Chỉ theo dõi khi giá hồi vùng SMA20/EMA50 và có nến H1 từ chối giá.",
+          entry_low: short_entry_low,
+          entry_high: short_entry_high,
+          stop_loss: short_stop,
+          take_profit: support,
+          reward_risk: rr(short_entry_low, short_stop, support)
+        },
+        %{
+          id: "long-sweep",
+          side: "buy",
+          title: "Bắt hồi sau cú quét hỗ trợ",
+          priority: "Thăm dò nhỏ",
+          condition: "Chỉ theo dõi nếu vùng hỗ trợ tạo pin bar hoặc bullish engulfing trên H1.",
+          entry_low: long_entry_low,
+          entry_high: long_entry_high,
+          stop_loss: round2(support - atr),
+          take_profit: round2(support + 5.6 * atr),
+          reward_risk: rr(long_entry_high, round2(support - atr), round2(support + 5.6 * atr))
+        }
+      ]
+    else
+      []
+    end
+  end
+
+  defp liquidity_watchlist(_indicators, _entry, _action, _lean), do: []
+
+  defp watchlist_commentary([]), do: "Chưa có vùng quét thanh khoản đủ điều kiện từ dữ liệu H1 hiện tại."
+
+  defp watchlist_commentary(watchlist) do
+    Enum.map_join(watchlist, "\n", fn zone ->
+      "- #{zone.priority}: #{zone.title}. Vùng #{usd(zone.entry_low)}–#{usd(zone.entry_high)}, SL #{usd(zone.stop_loss)}, TP #{usd(zone.take_profit)}. #{zone.condition}"
+    end)
+  end
+
+  defp rr(entry, stop, target) do
+    risk = abs(stop - entry)
+    reward = abs(entry - target)
+    if risk == 0, do: 0.0, else: Float.round(reward / risk, 2)
+  end
+
   defp summary(:buy, _lean, risk, nil, _indicators),
     do: "Mua theo hướng tăng. Rủi ro #{risk}. Lời lỗ chưa trừ phí thật của sàn."
 
@@ -297,14 +365,6 @@ defmodule GoldBackend.Services.TradePlan do
   defp direction_word("buy"), do: "nghiêng lên"
   defp direction_word("sell"), do: "nghiêng xuống"
   defp direction_word(_), do: "đi ngang"
-
-  defp stop_side(:sell), do: "trên"
-  defp stop_side("sell"), do: "trên"
-  defp stop_side(_), do: "dưới"
-
-  defp take_side(:sell), do: "dưới"
-  defp take_side("sell"), do: "dưới"
-  defp take_side(_), do: "trên"
 
   defp action_label(:buy), do: "Mua"
   defp action_label(:sell), do: "Bán"

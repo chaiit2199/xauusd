@@ -1,11 +1,6 @@
-// API_BASE_URL được inlin vào bundle lúc build (xem next.config.ts); mặc định:
-// empty = same origin (VPS: /api → :5005 qua Caddy/nginx).
-// Local .env.local: https://api-crypto.9nine.tech (never :4000 — that is only inside Docker).
-// NEXT_PUBLIC_API_URL chỉ là fallback cho các .env.local cũ.
-export const apiBase = (process.env.API_BASE_URL ?? process.env.NEXT_PUBLIC_API_URL ?? "").replace(
-  /\/$/,
-  "",
-);
+// The browser always uses same-origin /api. Caddy routes it in production;
+// Next.js uses its server-only API_BASE_URL rewrite in local/dev.
+export const apiBase = "";
 
 export function money(value: string | number): string {
   const amount = typeof value === "number" ? value : Number(value);

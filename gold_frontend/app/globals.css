@@ -105,7 +105,7 @@ button.primary {
 
 button:disabled { opacity: 0.55; cursor: progress; }
 
-.api-line, .basis, .indicator-note, .panel-head p, .news-list p, .empty, .ticket-summary, .level span, .ticket-notes, .original {
+.api-line, .basis, .indicator-note, .panel-head p, .news-list p, .empty, .ticket-summary, .level span, .ticket-notes, .original, .watch-condition {
   color: var(--muted);
 }
 
@@ -268,6 +268,24 @@ button:disabled { opacity: 0.55; cursor: progress; }
 
 .ticket-notes { margin: 14px 0 0; padding-left: 18px; display: grid; gap: 6px; line-height: 1.45; }
 
+.watchlist { margin-top: 20px; padding-top: 18px; border-top: 1px solid rgba(160, 196, 206, 0.12); }
+.watchlist-head { display: flex; justify-content: space-between; align-items: flex-start; gap: 12px; }
+.watchlist-head .eyebrow { margin-bottom: 4px; }
+.watchlist h3, .watchlist h4 { margin: 0; letter-spacing: -0.025em; }
+.watchlist h3 { font-size: 20px; }
+.watchlist-head > span { color: var(--warn); border: 1px solid rgba(231, 177, 90, .35); border-radius: 999px; padding: 5px 9px; font-size: 12px; }
+.watchlist-grid { display: grid; grid-template-columns: repeat(2, 1fr); gap: 12px; margin-top: 14px; }
+.watch-zone { padding: 15px; border: 1px solid var(--line); border-radius: 14px; background: #0c1c27; }
+.watch-zone.sell { border-top: 3px solid var(--down); }
+.watch-zone.buy { border-top: 3px solid var(--up); }
+.watch-priority { margin: 0 0 6px; color: var(--warn); font-size: 12px; font-weight: 650; text-transform: uppercase; letter-spacing: .06em; }
+.watch-zone h4 { font-size: 17px; }
+.watch-condition { margin: 8px 0 14px; min-height: 42px; font-size: 13px; line-height: 1.45; }
+.watch-zone dl { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; margin: 0; }
+.watch-zone dl div { border-top: 1px solid rgba(160, 196, 206, .12); padding-top: 8px; }
+.watch-zone dt { color: var(--muted); font-size: 11px; }
+.watch-zone dd { margin: 3px 0 0; font-size: 14px; font-variant-numeric: tabular-nums; }
+
 .panel { padding: 18px; }
 .panel-head { justify-content: space-between; align-items: baseline; }
 .panel-head p, .empty { margin: 0; }
@@ -353,6 +371,7 @@ button:disabled { opacity: 0.55; cursor: progress; }
   }
   .news-list a { grid-template-columns: 1fr; gap: 4px; align-items: start; }
   .indicator-grid { grid-template-columns: 1fr 1fr; }
+  .watchlist-grid { grid-template-columns: 1fr; }
   .actions { justify-content: flex-start; }
   h1 { font-size: 24px; }
   .ticket h2 { font-size: 34px; }

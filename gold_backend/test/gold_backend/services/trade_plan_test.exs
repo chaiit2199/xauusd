@@ -95,6 +95,12 @@ defmodule GoldBackend.Services.TradePlanTest do
     assert plan.stop_loss > plan.entry
     assert plan.take_profit < plan.entry
     assert plan.risk_score >= 7
+    assert [short, long] = plan.watchlist
+    assert short.side == "sell"
+    assert short.entry_low < short.entry_high
+    assert short.stop_loss > short.entry_high
+    assert long.side == "buy"
+    assert long.stop_loss < long.entry_low
   end
 
   defp indicators(overrides) do

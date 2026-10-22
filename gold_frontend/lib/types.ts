@@ -40,6 +40,20 @@ export type CfdPlan = {
   news_digest?: string | null;
   summary: string;
   notes: string[];
+  watchlist?: LiquidityWatchZone[];
+};
+
+export type LiquidityWatchZone = {
+  id: string;
+  side: "buy" | "sell";
+  title: string;
+  priority: string;
+  condition: string;
+  entry_low: number;
+  entry_high: number;
+  stop_loss: number;
+  take_profit: number;
+  reward_risk: number;
 };
 
 export type CalendarEvent = {
