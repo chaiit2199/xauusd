@@ -29,7 +29,7 @@ defmodule GoldBackend.Services.InsightCache do
   def peek do
     case Process.whereis(__MODULE__) do
       nil -> blank()
-      pid -> GenServer.call(pid, :peek, 5_000)
+      pid -> GenServer.call(pid, :peek, 30_000)
     end
   end
 
