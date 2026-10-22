@@ -322,6 +322,13 @@ button:disabled { opacity: 0.55; cursor: progress; }
 }
 .news-list time { color: var(--muted); font-size: 13px; white-space: nowrap; }
 
+.ai-meta {
+  margin: 0 0 10px;
+  color: var(--muted);
+  font-size: 14px;
+  line-height: 1.45;
+}
+
 .ai-body {
   white-space: pre-wrap;
   line-height: 1.65;

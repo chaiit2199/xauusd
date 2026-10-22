@@ -8,13 +8,21 @@ defmodule GoldBackendWeb.TradingController do
   alias GoldBackend.Services.{
     EconomicCalendar,
     Indicators,
+    NewsBias,
     NewsCrawler,
     NewsTranslator,
+    OllamaAnalyzer,
     TradePlan,
     InsightCache
   }
 
   alias GoldBackend.Trading.{GoldPrice, NewsArticle}
+
+  # Live quotes unlock the ticket. Seed fills ~5 days of hourly bars so SMA20 /
+  # EMA50 / ATR can compute immediately; those rows alone must not lock trading
+  # forever. Synthetic prints (API down) still count as warmup.
+  @live_origins ~w(metals_dev gold_api)
+  @min_live_ticks 3
 
   def trigger_crawl_news(conn, _params) do
     sources = NewsCrawler.fetch_and_save_all()
@@ -43,7 +51,27 @@ defmodule GoldBackendWeb.TradingController do
 
   def build_context(opts \\ []), do: market_context(opts)
 
-  def write_commentary(context), do: {TradePlan.commentary(context.plan), nil}
+  def write_commentary(context) do
+    extras = %{
+      indicators: context.indicators,
+      news_digest: context.news_bias.digest
+    }
+
+    case OllamaAnalyzer.analyze_market(
+           context.indicators,
+           context.news,
+           context.price_ticks,
+           context.plan,
+           context.news_bias
+         ) do
+      {:ok, text} ->
+        {:ok, aligned} = OllamaAnalyzer.align({:ok, text}, context.plan)
+        {aligned, nil}
+
+      {:error, reason} ->
+        {TradePlan.commentary(context.plan, extras), reason}
+    end
+  end
 
   def overview(conn, _params) do
     case market_context(translate_timeout: 4_000) do
@@ -85,14 +113,18 @@ defmodule GoldBackendWeb.TradingController do
       latest = Enum.max_by(prices, & &1.timestamp, DateTime)
       summary = Indicators.summarize(prices)
       entry = latest.price |> Decimal.round(2) |> Decimal.to_float()
-      warmup = Enum.any?(prices, &(&1.origin in ["seed", "synthetic"]))
+      live_ticks = Enum.count(prices, &(&1.origin in @live_origins))
+      {warmup, warmup_detail} = warmup_state(latest, live_ticks)
       events = EconomicCalendar.upcoming_usd(now)
       blocking = EconomicCalendar.blocking(events, now)
+      news_bias = NewsBias.assess(news)
 
       plan =
         TradePlan.build(summary.indicators, entry,
           warmup: warmup,
-          blocking_event: blocking
+          warmup_detail: warmup_detail,
+          blocking_event: blocking,
+          news_bias: news_bias
         )
 
       {:ok,
@@ -100,13 +132,37 @@ defmodule GoldBackendWeb.TradingController do
          latest: latest,
          prices: prices,
          news: news,
+         news_bias: news_bias,
          summary: summary,
          indicators: summary.indicators,
          warmup: warmup,
+         warmup_detail: warmup_detail,
+         live_price_ticks: live_ticks,
          events: events,
          plan: plan,
          price_ticks: length(prices)
        }}
+    end
+  end
+
+  defp warmup_state(latest, live_ticks) do
+    live? = latest.origin in @live_origins
+
+    cond do
+      not live? and latest.origin == "seed" ->
+        {true,
+         "Giá hiện tại vẫn là dữ liệu khởi tạo (seed). Cần ~5 ngày mẫu giờ để SMA20/EMA50/ATR ổn định; seed chỉ lấp chỗ trống lúc mở hệ thống. Chưa vào lệnh đến khi có giá thị trường thật."}
+
+      not live? ->
+        {true,
+         "Giá hiện tại là giá nội bộ (synthetic) vì nguồn thị trường tạm lỗi. Chưa vào lệnh cho đến khi lấy lại được giá live."}
+
+      live_ticks < @min_live_ticks ->
+        {true,
+         "Mới có #{live_ticks}/#{@min_live_ticks} tick giá thị trường thật. Lịch sử 5 ngày (gồm seed) dùng để tính chỉ báo; phiếu lệnh mở sau khi có đủ giá live liên tục."}
+
+      true ->
+        {false, nil}
     end
   end
 
@@ -119,16 +175,21 @@ defmodule GoldBackendWeb.TradingController do
       price_origin: latest.origin,
       as_of: DateTime.to_iso8601(latest.timestamp),
       price_ticks_5d: context.price_ticks,
+      live_price_ticks: context.live_price_ticks,
       hourly_samples: context.summary.hourly_samples,
-      indicator_basis: "Giá đóng cửa theo giờ, khung H1",
+      indicator_basis: "Giá đóng cửa theo giờ, khung H1 · cửa sổ 5 ngày (~120 mẫu) cho SMA20/EMA50",
       warmup: context.warmup,
+      warmup_detail: context.warmup_detail,
       recent_prices: recent_prices(context.prices),
       indicators_10: context.indicators,
       alerts: context.summary.alerts,
       cfd_plan: context.plan,
       news_3d_count: length(context.news),
       news_3d: Enum.map(context.news, &article_json/1),
-      events: Enum.map(context.events, &event_json/1)
+      news_tone: context.news_bias.tone_label,
+      news_digest: context.news_bias.digest,
+      events: Enum.map(context.events, &event_json/1),
+      analysis_interval_seconds: InsightCache.interval_seconds()
     }
   end
 

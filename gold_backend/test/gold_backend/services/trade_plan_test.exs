@@ -49,10 +49,30 @@ defmodule GoldBackend.Services.TradePlanTest do
   end
 
   test "seeded history blocks a live order" do
-    plan = TradePlan.build(indicators(%{}), 4130.4, warmup: true)
+    plan =
+      TradePlan.build(indicators(%{}), 4130.4,
+        warmup: true,
+        warmup_detail: "Giá hiện tại vẫn là dữ liệu khởi tạo (seed)."
+      )
 
     assert plan.action == "wait"
-    assert plan.block_reason =~ "giá thị trường"
+    assert plan.block_reason =~ "khởi tạo"
+  end
+
+  test "news digest is attached to the ticket and raises risk when conflicting" do
+    bias = %{
+      tone: :gold_bullish,
+      tone_label: "Tin nghiêng ủng hộ vàng",
+      high_impact: true,
+      digest: "Tin nghiêng ủng hộ vàng (ủng hộ 2, đè 0)."
+    }
+
+    plan = TradePlan.build(indicators(%{stochastic_k: 5.0, rsi_14: 32.0}), 4130.4, news_bias: bias)
+
+    assert plan.news_tone == "Tin nghiêng ủng hộ vàng"
+    assert plan.news_digest =~ "ủng hộ vàng"
+    assert Enum.any?(plan.notes, &String.contains?(&1, "ngược hướng"))
+    assert plan.risk_score >= 7
   end
 
   test "commentary that recommends a buy is replaced by the locked ticket" do

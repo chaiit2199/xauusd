@@ -16,6 +16,9 @@ type AiReportProps = {
   pending: boolean;
   elapsed: number;
   cachedAt?: string | null;
+  newsTone?: string | null;
+  nextInSeconds?: number | null;
+  intervalSeconds?: number;
 };
 
 export function AiReport({
@@ -24,17 +27,30 @@ export function AiReport({
   pending,
   elapsed,
   cachedAt,
+  newsTone,
+  nextInSeconds,
+  intervalSeconds = 300,
 }: AiReportProps) {
+  const cadence = Math.round(intervalSeconds / 60);
+
   return (
     <section className="panel ai-panel">
       <div className="panel-head">
-        <h2>Phân tích H1</h2>
+        <h2>Nhận định H1 · {cadence} phút</h2>
         <p>
-          {cachedAt
-            ? `Cập nhật lúc ${when(cachedAt)}`
-            : "Giải thích ngắn theo phiếu lệnh"}
+          {pending
+            ? `Đang soạn từ giá + chỉ báo + tin… ${elapsed}s`
+            : cachedAt
+              ? `Cập nhật lúc ${when(cachedAt)}${
+                  nextInSeconds != null && nextInSeconds > 0
+                    ? ` · lần sau ~${formatCountdown(nextInSeconds)}`
+                    : ""
+                }`
+              : `Tự chạy mỗi ${cadence} phút theo data và tin hiện có`}
         </p>
       </div>
+
+      {newsTone ? <p className="ai-meta">{newsTone}</p> : null}
 
       {pending ? (
         <p className="empty">Đang soạn diễn giải. Đã {elapsed} giây.</p>
@@ -46,10 +62,18 @@ export function AiReport({
 
       {!pending && !error && !insight ? (
         <p className="empty">
-          Bấm «Nhận định H1» để đọc giải thích. Phiếu lệnh phía trên là quyết
-          định.
+          Đang chờ chu kỳ nhận định đầu tiên (backend tự chạy sau vài giây).
+          Phiếu lệnh phía trên là quyết định; phần này giải thích bằng số liệu
+          và tin.
         </p>
       ) : null}
     </section>
   );
+}
+
+function formatCountdown(seconds: number) {
+  const m = Math.floor(seconds / 60);
+  const s = seconds % 60;
+  if (m <= 0) return `${s}s`;
+  return `${m}m${s.toString().padStart(2, "0")}s`;
 }

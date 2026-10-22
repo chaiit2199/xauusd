@@ -1,25 +1,30 @@
 defmodule GoldBackend.Services.InsightCache do
   @moduledoc """
-  Keeps one H1 commentary for 15 minutes.
+  Keeps one H1 commentary for five minutes.
 
-  A timer clears that note and writes a new one from the latest rows in the
-  database. A request inside the window returns the stored note when the
-  ticket still has the same side. The page load never starts a new note.
+  A timer refreshes news lightly, rebuilds the ticket from the latest rows,
+  then asks the local model to explain price + indicators + headlines.
+  A request inside the window returns the stored note when the ticket still
+  has the same side. The page load never starts a new note.
   """
 
   use GenServer
 
+  alias GoldBackend.Services.NewsCrawler
   alias GoldBackendWeb.TradingController
 
   require Logger
 
-  @ttl_seconds 15 * 60
-  @interval_ms 15 * 60 * 1000
+  @ttl_seconds 5 * 60
+  @interval_ms 5 * 60 * 1000
+  @boot_delay_ms 8_000
   @call_timeout 150_000
 
   def start_link(_opts) do
     GenServer.start_link(__MODULE__, %{}, name: __MODULE__)
   end
+
+  def interval_seconds, do: @ttl_seconds
 
   def peek do
     case Process.whereis(__MODULE__) do
@@ -45,7 +50,7 @@ defmodule GoldBackend.Services.InsightCache do
 
   @impl true
   def init(_state) do
-    schedule()
+    Process.send_after(self(), :refresh, @boot_delay_ms)
     {:ok, empty_state()}
   end
 
@@ -68,6 +73,8 @@ defmodule GoldBackend.Services.InsightCache do
   end
 
   defp refresh_from_database do
+    refresh_news()
+
     case TradingController.build_context(translate_timeout: 8_000) do
       {:ok, context} ->
         compute(context)
@@ -76,6 +83,15 @@ defmodule GoldBackend.Services.InsightCache do
         Logger.warning("Insight refresh skipped: #{reason}")
         empty_state()
     end
+  end
+
+  defp refresh_news do
+    sources = NewsCrawler.fetch_and_save_all()
+    saved = Enum.reduce(sources, 0, fn source, acc -> acc + source.saved end)
+    Logger.info("Insight cycle crawled news, saved #{saved} articles")
+  rescue
+    error ->
+      Logger.warning("Insight news crawl skipped: #{Exception.message(error)}")
   end
 
   defp compute(context) do
@@ -98,14 +114,16 @@ defmodule GoldBackend.Services.InsightCache do
       %{
         ai_insight: state.insight,
         ai_error: state.error,
-        ai_cached_at: DateTime.to_iso8601(state.generated_at)
+        ai_cached_at: DateTime.to_iso8601(state.generated_at),
+        ai_ttl_seconds: @ttl_seconds
       }
     else
       blank()
     end
   end
 
-  defp blank, do: %{ai_insight: nil, ai_error: nil, ai_cached_at: nil}
+  defp blank,
+    do: %{ai_insight: nil, ai_error: nil, ai_cached_at: nil, ai_ttl_seconds: @ttl_seconds}
 
   defp empty_state, do: %{insight: nil, error: nil, generated_at: nil, action: nil}
 

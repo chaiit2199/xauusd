@@ -10,6 +10,9 @@ import { NewsList } from "./news-list";
 import { Sparkline } from "./sparkline";
 import { TradeTicket } from "./trade-ticket";
 
+const ANALYZE_MS = 5 * 60 * 1000;
+const BOARD_MS = 60_000;
+
 export function Dashboard() {
   const [crawling, setCrawling] = useState(false);
   const [analyzing, setAnalyzing] = useState(false);
@@ -23,7 +26,9 @@ export function Dashboard() {
   const [crawlError, setCrawlError] = useState<string | null>(null);
   const [analyzeError, setAnalyzeError] = useState<string | null>(null);
   const [boardError, setBoardError] = useState<string | null>(null);
+  const [nextIn, setNextIn] = useState<number | null>(null);
   const analyzingRef = useRef(false);
+  const analyzeLock = useRef(false);
 
   useEffect(() => {
     analyzingRef.current = analyzing;
@@ -54,10 +59,50 @@ export function Dashboard() {
     }
 
     void loadBoard();
-    const id = window.setInterval(() => void loadBoard(), 180_000);
+    const id = window.setInterval(() => void loadBoard(), BOARD_MS);
 
     return () => {
       cancelled = true;
+      window.clearInterval(id);
+    };
+  }, []);
+
+  useEffect(() => {
+    let cancelled = false;
+
+    async function runAnalyze(force: boolean) {
+      if (analyzeLock.current) return;
+      analyzeLock.current = true;
+      analyzingRef.current = true;
+      setAnalyzing(true);
+      setAnalyzeError(null);
+
+      try {
+        const result = await analyzeMarket();
+        if (cancelled && !force) return;
+        setBoard(result);
+        setInsight(result.ai_insight);
+        setInsightError(result.ai_error);
+        setCachedAt(result.ai_cached_at);
+      } catch (error) {
+        if (!cancelled) {
+          setAnalyzeError(
+            error instanceof Error ? error.message : "Không lấy được nhận định.",
+          );
+        }
+      } finally {
+        analyzingRef.current = false;
+        setAnalyzing(false);
+        analyzeLock.current = false;
+      }
+    }
+
+    const boot = window.setTimeout(() => void runAnalyze(false), 2_000);
+    const id = window.setInterval(() => void runAnalyze(false), ANALYZE_MS);
+
+    return () => {
+      cancelled = true;
+      window.clearTimeout(boot);
       window.clearInterval(id);
     };
   }, []);
@@ -76,13 +121,40 @@ export function Dashboard() {
     return () => window.clearInterval(id);
   }, [analyzing]);
 
+  useEffect(() => {
+    const ttl =
+      board?.ai_ttl_seconds ?? board?.analysis_interval_seconds ?? 300;
+
+    function tick() {
+      if (!cachedAt) {
+        setNextIn(null);
+        return;
+      }
+
+      const cachedMs = new Date(cachedAt).getTime();
+      if (Number.isNaN(cachedMs)) {
+        setNextIn(null);
+        return;
+      }
+
+      const remaining = Math.max(
+        0,
+        Math.ceil((cachedMs + ttl * 1000 - Date.now()) / 1000),
+      );
+      setNextIn(remaining);
+    }
+
+    tick();
+    const id = window.setInterval(tick, 1_000);
+    return () => window.clearInterval(id);
+  }, [cachedAt, board?.ai_ttl_seconds, board?.analysis_interval_seconds]);
+
   async function onCrawl() {
     setCrawling(true);
     setCrawlError(null);
 
     try {
       const result = await crawlNews();
-      console.log(result);
       setCrawl(result);
       setBoard(await fetchOverview());
     } catch (error) {
@@ -95,6 +167,8 @@ export function Dashboard() {
   }
 
   async function onAnalyze() {
+    if (analyzeLock.current) return;
+    analyzeLock.current = true;
     analyzingRef.current = true;
     setAnalyzing(true);
     setAnalyzeError(null);
@@ -112,6 +186,7 @@ export function Dashboard() {
     } finally {
       analyzingRef.current = false;
       setAnalyzing(false);
+      analyzeLock.current = false;
     }
   }
 
@@ -123,6 +198,8 @@ export function Dashboard() {
     prices.length > 1 && first !== undefined && last !== undefined
       ? last - first
       : null;
+  const intervalSeconds =
+    view?.analysis_interval_seconds ?? view?.ai_ttl_seconds ?? 300;
 
   return (
     <main className="page">
@@ -148,7 +225,11 @@ export function Dashboard() {
             onClick={onAnalyze}
             disabled={analyzing || !view}
           >
-            {analyzing ? `Đang nhận định ${elapsed}s` : "Nhận định H1"}
+            {analyzing
+              ? `Đang nhận định ${elapsed}s`
+              : nextIn != null && nextIn > 0
+                ? `Nhận định ngay · còn ${Math.ceil(nextIn / 60)}p`
+                : "Nhận định ngay"}
           </button>
         </div>
       </header>
@@ -188,8 +269,11 @@ export function Dashboard() {
         <>
           {view.warmup ? (
             <p className="banner warn">
-              Giá 5 ngày gần đây vẫn còn dữ liệu khởi tạo, chưa phải giá thị
-              trường liên tục. Phiếu lệnh đang để Không giao dịch.
+              {view.warmup_detail ||
+                "Đang warmup chỉ báo: cần cửa sổ ~5 ngày giá theo giờ (SMA20/EMA50/ATR). Seed chỉ để khởi tạo lịch sử — phiếu lệnh khóa «Không giao dịch» đến khi có đủ giá thị trường thật."}
+              {typeof view.live_price_ticks === "number"
+                ? ` Tick live hiện có: ${view.live_price_ticks}/${view.price_ticks_5d}.`
+                : null}
             </p>
           ) : null}
 
@@ -201,6 +285,10 @@ export function Dashboard() {
                 .join(" · ")}
               . Không vào lệnh trong 30 phút trước và sau giờ ra tin.
             </p>
+          ) : null}
+
+          {view.news_digest ? (
+            <p className="banner">{view.news_digest}</p>
           ) : null}
 
           <TradeTicket plan={view.cfd_plan} />
@@ -229,8 +317,11 @@ export function Dashboard() {
                 ) : null}
               </p>
               <p className="basis">
-                {view.price_ticks_5d} tick · {view.hourly_samples} mẫu giờ ·{" "}
-                {view.indicator_basis}
+                {view.price_ticks_5d} tick / 5 ngày
+                {typeof view.live_price_ticks === "number"
+                  ? ` · ${view.live_price_ticks} live`
+                  : ""}{" "}
+                · {view.hourly_samples} mẫu giờ · {view.indicator_basis}
               </p>
             </div>
             <Sparkline values={prices} />
@@ -244,6 +335,9 @@ export function Dashboard() {
             pending={analyzing}
             elapsed={elapsed}
             cachedAt={analyzing ? null : cachedAt}
+            newsTone={view.news_tone}
+            nextInSeconds={analyzing ? null : nextIn}
+            intervalSeconds={intervalSeconds}
           />
           <div className="news-band">
             <NewsList

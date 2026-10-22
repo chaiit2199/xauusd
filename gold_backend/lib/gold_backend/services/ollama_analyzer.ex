@@ -3,9 +3,10 @@ defmodule GoldBackend.Services.OllamaAnalyzer do
   Asks a local Ollama model for a Vietnamese XAU/USD note.
 
   Defaults target a CPU VPS running `deepseek-r1:1.5b`:
-  the HTTP socket waits 120s, the prompt asks for a short report, and
-  `num_predict` caps the answer so the reasoning model can finish.
-  `keep_alive` leaves the weights in RAM between the two button clicks.
+  the HTTP socket waits 120s, the prompt asks for a short report grounded in
+  the live H1 ticket, indicators, and scored headlines, and `num_predict`
+  caps the answer so the reasoning model can finish.
+  `keep_alive` leaves the weights in RAM between refresh cycles.
   """
 
   alias GoldBackend.Services.TradePlan
@@ -14,20 +15,20 @@ defmodule GoldBackend.Services.OllamaAnalyzer do
 
   require Logger
 
-  def analyze_market(indicators, news_list, price_history_count, plan) do
+  def analyze_market(indicators, news_list, price_history_count, plan, news_bias \\ nil) do
     config = Application.get_env(:gold_backend, :ollama, [])
     timeout = Keyword.get(config, :timeout_ms, @default_timeout)
 
     body =
       Jason.encode!(%{
         model: Keyword.get(config, :model, "deepseek-r1:1.5b"),
-        prompt: build_prompt(indicators, news_list, price_history_count, plan),
+        prompt: build_prompt(indicators, news_list, price_history_count, plan, news_bias),
         stream: false,
         keep_alive: "30m",
         options: %{
           temperature: 0.1,
           top_p: 0.9,
-          num_predict: 700,
+          num_predict: 900,
           num_ctx: 4096
         }
       })
@@ -126,15 +127,17 @@ defmodule GoldBackend.Services.OllamaAnalyzer do
     )
   end
 
-  defp build_prompt(indicators, news_list, price_count, plan) do
+  defp build_prompt(indicators, news_list, price_count, plan, news_bias) do
     news_text = format_news(news_list)
     bands = indicators.bollinger_bands
     pivot = indicators.pivot_level
+    news_digest = news_bias_digest(news_bias)
 
     """
-    Bạn là chuyên gia quản trị rủi ro CFD vàng (XAUUSD), khung H1.
+    Bạn là desk risk CFD vàng (XAUUSD), khung H1, chu kỳ nhận định 5 phút.
     Viết tiếng Việt, ngắn, không cảm xúc. Không nêu tên mô hình. Không viết phần suy luận.
     Bạn KHÔNG được đảo quyết định bên dưới. Không được đề xuất chiều lệnh khác.
+    Bắt buộc bám số liệu và tin đã cho — cấm nhận định chung chung không trích dẫn.
 
     QUY TẮC
     - Không bắt đáy khi Giá < SMA20 và MACD < 0.
@@ -146,6 +149,7 @@ defmodule GoldBackend.Services.OllamaAnalyzer do
     - Tin dự báo năm, ngân hàng trung ương, Hội đồng Vàng chỉ là bối cảnh. Không dùng để vào lệnh trong ngày.
     - CPI, NFP, FOMC, Fed, DXY tác động mạnh: nhắc không vào lệnh 30 phút trước và sau tin.
     - Nếu phiếu ghi Không giao dịch, phần định kiến phải là đúng câu đó. Cấm viết Mua hoặc Bán như lệnh cần vào.
+    - Nếu tin ngược hướng kỹ thuật, nói rõ xung đột và ưu tiên đứng ngoài / giảm size.
 
     QUYẾT ĐỊNH ĐÃ CHỐT
     - Trạng thái: #{plan.market_state}
@@ -157,24 +161,29 @@ defmodule GoldBackend.Services.OllamaAnalyzer do
     - R:R sau spread: 1:#{plan.reward_risk_after_spread}
     - Rủi ro: #{plan.risk_score}/10
     - Lý do: #{plan.block_reason || plan.summary}
+    - Giọng tin máy chấm: #{news_digest}
 
-    DỮ LIỆU H1 (#{price_count} mẫu trong 5 ngày)
+    DỮ LIỆU H1 (#{price_count} tick trong cửa sổ 5 ngày — đủ cho SMA20/EMA50)
     - Giá #{indicators.current_price} | SMA20 #{indicators.sma_20} | EMA50 #{indicators.ema_50}
     - RSI #{indicators.rsi_14} | MACD #{indicators.macd} | Stochastic #{indicators.stochastic_k}
     - Bollinger #{bands.lower} – #{bands.upper} | ATR #{indicators.atr_14}
     - Pivot #{pivot.p} | R1 #{pivot.r1} | S1 #{pivot.s1} | ROC #{indicators.roc_10}%
 
-    TIN
+    TIN 3 NGÀY (đã gắn nhãn)
     #{news_text}
 
-    VIẾT ĐÚNG 5 MỤC
-    1. Xu hướng, kèm bằng chứng SMA, EMA, MACD.
+    VIẾT ĐÚNG 6 MỤC
+    1. Xu hướng H1, trích đúng SMA/EMA/MACD từ bảng trên.
     2. Trạng thái: #{plan.market_state}. Nói rõ giá bám biên dưới là giảm tiếp diễn nếu đúng như vậy.
     3. Định kiến: #{plan.action_label}.
-    4. Mức đã chốt: vùng giá #{plan.entry}, cắt lỗ #{plan.stop_loss}, chốt lời #{plan.take_profit}. Không đổi các con số này.
-    5. Rủi ro #{plan.risk_score}/10 và lý do giữ hoặc không vào lệnh.
+    4. Tin tức: chọn 1–2 tiêu đề cụ thể (hoặc nói rõ không có tin đáng kể) và giải thích ảnh hưởng ngắn hạn tới XAUUSD / USD.
+    5. Mức đã chốt: vùng giá #{plan.entry}, cắt lỗ #{plan.stop_loss}, chốt lời #{plan.take_profit}. Không đổi các con số này.
+    6. Rủi ro #{plan.risk_score}/10 và lý do giữ hoặc không vào lệnh trong 5 phút tới.
     """
   end
+
+  defp news_bias_digest(%{digest: digest}) when is_binary(digest), do: digest
+  defp news_bias_digest(_), do: "Chưa chấm được tin."
 
   defp format_news([]), do: "- Không có tin trong 3 ngày."
 

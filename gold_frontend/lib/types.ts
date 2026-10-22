@@ -36,6 +36,8 @@ export type CfdPlan = {
   risk_label: string;
   market_state: string;
   block_reason: string | null;
+  news_tone?: string | null;
+  news_digest?: string | null;
   summary: string;
   notes: string[];
 };
@@ -79,19 +81,25 @@ export type MarketBoard = {
   price_origin: string;
   as_of: string | null;
   price_ticks_5d: number;
+  live_price_ticks?: number;
   hourly_samples: number;
   indicator_basis: string;
   warmup: boolean;
+  warmup_detail?: string | null;
   recent_prices: PriceTick[];
   indicators_10: Indicators;
   alerts: string[];
   cfd_plan: CfdPlan;
   news_3d_count: number;
   news_3d: Article[];
+  news_tone?: string | null;
+  news_digest?: string | null;
   events: CalendarEvent[];
+  analysis_interval_seconds?: number;
   ai_insight?: string | null;
   ai_error?: string | null;
   ai_cached_at?: string | null;
+  ai_ttl_seconds?: number;
 };
 
 export type AnalyzeData = MarketBoard & {

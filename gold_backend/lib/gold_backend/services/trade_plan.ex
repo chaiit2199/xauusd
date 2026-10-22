@@ -17,10 +17,11 @@ defmodule GoldBackend.Services.TradePlan do
     take_usd = round2(stop_usd * 2)
     rr_after_spread = reward_after_spread(stop_usd, take_usd)
     signal_action = action(indicators, lean)
+    news_bias = Keyword.get(opts, :news_bias)
     block = block_reason(opts, rr_after_spread, signal_action)
     action = if block, do: :wait, else: signal_action
     {stop_loss, take_profit} = levels(lean, entry, stop_usd, take_usd)
-    score = risk_score(indicators, action, lean, block)
+    score = risk_score(indicators, action, lean, block, news_bias)
 
     %{
       instrument: "XAUUSD",
@@ -45,18 +46,38 @@ defmodule GoldBackend.Services.TradePlan do
       risk_score: score,
       risk_label: risk_label(score),
       block_reason: block,
+      news_tone: news_tone(news_bias),
+      news_digest: news_digest(news_bias),
       summary: summary(action, lean, risk_label(score), block, indicators),
-      notes: notes(indicators, lean, stop_usd)
+      notes: notes(indicators, lean, stop_usd, news_bias)
     }
   end
 
-  def commentary(plan) do
+  def commentary(plan, extras \\ %{}) do
     watch? = plan.action == "wait"
+    indicators = Map.get(extras, :indicators)
+    news_digest = Map.get(extras, :news_digest) || Map.get(plan, :news_digest)
+
+    evidence =
+      cond do
+        is_map(indicators) ->
+          "Bằng chứng H1: giá #{usd(indicators.current_price)} vs SMA20 #{usd(indicators.sma_20)}, EMA50 #{usd(indicators.ema_50)}; MACD #{indicators.macd}; RSI #{indicators.rsi_14}; ATR #{usd(indicators.atr_14)}."
+
+        true ->
+          nil
+      end
+
+    news_line =
+      if is_binary(news_digest) and news_digest != "",
+        do: "Tin gần đây: #{news_digest}",
+        else: "Tin gần đây: chưa có tiêu đề đủ mạnh trong 3 ngày."
 
     """
     Giá đang xem: #{usd(plan.entry)} USD.
     Quyết định: #{plan.action_label}. #{plan.block_reason || "Tín hiệu đã cùng một hướng."}
-    Giá đang #{direction_word(plan.lean)}.
+    Giá đang #{direction_word(plan.lean)}. Trạng thái: #{plan.market_state}.
+    #{evidence}
+    #{news_line}
 
     #{if watch?, do: "Các mức dưới đây chỉ để xem, chưa phải lệnh cần vào.", else: "Mức lệnh:"}
     Cắt lỗ #{usd(plan.stop_loss)} USD, nằm #{stop_side(plan.lean)} giá #{usd(plan.stop_distance)} USD.
@@ -65,6 +86,7 @@ defmodule GoldBackend.Services.TradePlan do
 
     Rủi ro #{plan.risk_score} trên 10, mức #{plan.risk_label}.
     """
+    |> String.replace(~r/\n{3,}/, "\n\n")
     |> String.trim()
   end
 
@@ -121,10 +143,12 @@ defmodule GoldBackend.Services.TradePlan do
 
   defp block_reason(opts, rr_after_spread, signal_action) do
     event = Keyword.get(opts, :blocking_event)
+    warmup_detail = Keyword.get(opts, :warmup_detail)
 
     cond do
       Keyword.get(opts, :warmup, false) ->
-        "Giá 5 ngày gần đây vẫn còn dữ liệu khởi tạo, chưa phải giá thị trường liên tục."
+        warmup_detail ||
+          "Chưa đủ giá thị trường thật để vào lệnh. Lịch sử 5 ngày (gồm seed) chỉ để tính SMA/EMA/ATR."
 
       event ->
         "Sắp có tin #{event.title}. Chưa vào lệnh từ 30 phút trước đến 30 phút sau giờ ra tin."
@@ -157,7 +181,9 @@ defmodule GoldBackend.Services.TradePlan do
   defp levels(:sell, entry, stop_usd, take_usd),
     do: {round2(entry + stop_usd), round2(entry - take_usd)}
 
-  defp risk_score(indicators, action, lean, block) do
+  defp risk_score(indicators, action, lean, block, news_bias) do
+    conflict? = news_conflicts?(lean, news_bias)
+
     score =
       3
       |> add(2, indicators.rsi_14 >= 70 or indicators.rsi_14 <= 30)
@@ -168,9 +194,24 @@ defmodule GoldBackend.Services.TradePlan do
       |> add(2, lean == :sell and indicators.stochastic_k <= 20)
       |> add(2, lean == :buy and indicators.stochastic_k >= 80)
       |> add(2, is_binary(block))
+      |> add(1, news_bias_high_impact?(news_bias))
+      |> add(1, conflict?)
 
     score |> max(1) |> min(10)
   end
+
+  defp news_conflicts?(:buy, %{tone: :gold_bearish}), do: true
+  defp news_conflicts?(:sell, %{tone: :gold_bullish}), do: true
+  defp news_conflicts?(_, _), do: false
+
+  defp news_bias_high_impact?(%{high_impact: true}), do: true
+  defp news_bias_high_impact?(_), do: false
+
+  defp news_tone(%{tone_label: label}) when is_binary(label), do: label
+  defp news_tone(_), do: nil
+
+  defp news_digest(%{digest: digest}) when is_binary(digest), do: digest
+  defp news_digest(_), do: nil
 
   defp market_state(indicators, lean) do
     cond do
@@ -209,7 +250,7 @@ defmodule GoldBackend.Services.TradePlan do
     price > indicators.bollinger_bands.upper or price < indicators.bollinger_bands.lower
   end
 
-  defp notes(indicators, lean, stop_usd) do
+  defp notes(indicators, lean, stop_usd, news_bias) do
     pivot = indicators.pivot_level
     place = if(lean == :sell, do: "trên", else: "dưới")
 
@@ -228,6 +269,11 @@ defmodule GoldBackend.Services.TradePlan do
     |> maybe(
       "Giá đã xuống dưới #{usd(pivot.s1)} USD. Mốc này giờ là vùng cản phía trên.",
       indicators.current_price < pivot.s1
+    )
+    |> maybe(news_digest(news_bias), is_binary(news_digest(news_bias)))
+    |> maybe(
+      "Tin đang ngược hướng kỹ thuật — giảm kích thước lệnh hoặc đứng ngoài nếu chưa có xác nhận.",
+      news_conflicts?(lean, news_bias)
     )
   end
 

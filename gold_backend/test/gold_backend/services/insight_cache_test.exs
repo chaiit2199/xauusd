@@ -3,24 +3,28 @@ defmodule GoldBackend.Services.InsightCacheTest do
 
   alias GoldBackend.Services.InsightCache
 
-  test "a note stays usable for fifteen minutes when the side is unchanged" do
+  test "a note stays usable for five minutes when the side is unchanged" do
     now = ~U[2026-10-21 13:00:00Z]
-    cached_at = DateTime.add(now, -14 * 60, :second)
+    cached_at = DateTime.add(now, -4 * 60, :second)
 
     assert InsightCache.fresh?(cached_at, "wait", "wait", now)
   end
 
-  test "a note is cleared at fifteen minutes" do
-    now = ~U[2026-10-21 13:15:00Z]
-    cached_at = DateTime.add(now, -15 * 60, :second)
+  test "a note is cleared at five minutes" do
+    now = ~U[2026-10-21 13:05:00Z]
+    cached_at = DateTime.add(now, -5 * 60, :second)
 
     refute InsightCache.fresh?(cached_at, "wait", "wait", now)
   end
 
   test "a changed ticket side cannot reuse the stored note" do
-    now = ~U[2026-10-21 13:05:00Z]
+    now = ~U[2026-10-21 13:02:00Z]
     cached_at = DateTime.add(now, -60, :second)
 
     refute InsightCache.fresh?(cached_at, "wait", "sell", now)
+  end
+
+  test "interval is five minutes" do
+    assert InsightCache.interval_seconds() == 300
   end
 end
