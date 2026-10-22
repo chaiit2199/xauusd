@@ -18,7 +18,9 @@ defmodule GoldBackend.Services.InsightCache do
   @ttl_seconds 5 * 60
   @interval_ms 5 * 60 * 1000
   @boot_delay_ms 8_000
-  @call_timeout 150_000
+  @job_timeout_ms 165_000
+  @call_timeout 170_000
+  @table __MODULE__
 
   def start_link(_opts) do
     GenServer.start_link(__MODULE__, %{}, name: __MODULE__)
@@ -27,16 +29,33 @@ defmodule GoldBackend.Services.InsightCache do
   def interval_seconds, do: @ttl_seconds
 
   def peek do
-    case Process.whereis(__MODULE__) do
-      nil -> blank()
-      pid -> GenServer.call(pid, :peek, 30_000)
+    case :ets.whereis(@table) do
+      :undefined ->
+        blank()
+
+      _table ->
+        case :ets.lookup(@table, :cache) do
+          [{:cache, state}] -> view(state)
+          _ -> blank()
+        end
     end
+  rescue
+    ArgumentError -> blank()
   end
 
   def resolve(context) do
     case Process.whereis(__MODULE__) do
-      nil -> view(compute(context))
-      pid -> GenServer.call(pid, {:resolve, context}, @call_timeout)
+      nil ->
+        blank()
+
+      pid ->
+        try do
+          GenServer.call(pid, {:resolve, context}, @call_timeout)
+        catch
+          :exit, reason ->
+            Logger.warning("Insight resolve unavailable: #{inspect(reason)}")
+            peek()
+        end
     end
   end
 
@@ -50,26 +69,62 @@ defmodule GoldBackend.Services.InsightCache do
 
   @impl true
   def init(_state) do
+    :ets.new(@table, [:named_table, :protected, :set, read_concurrency: true])
+    state = empty_state()
+    publish(state)
     Process.send_after(self(), :refresh, @boot_delay_ms)
-    {:ok, empty_state()}
+    {:ok, state}
   end
 
   @impl true
-  def handle_info(:refresh, _state) do
+  def handle_info(:refresh, state) do
     schedule()
-    {:noreply, refresh_from_database()}
+
+    if state.job_ref do
+      Logger.info("Insight refresh skipped: previous background job is still running")
+      {:noreply, state}
+    else
+      {:noreply, start_job(state, &refresh_from_database/0)}
+    end
+  end
+
+  def handle_info({ref, {:ok, cache}}, %{job_ref: ref} = state) do
+    Process.demonitor(ref, [:flush])
+    {:noreply, finish_job(state, cache)}
+  end
+
+  def handle_info({ref, {:error, reason}}, %{job_ref: ref} = state) do
+    Process.demonitor(ref, [:flush])
+    Logger.warning("Insight background job skipped: #{inspect(reason)}")
+    {:noreply, finish_job(state, nil)}
+  end
+
+  def handle_info({:DOWN, ref, :process, _pid, reason}, %{job_ref: ref} = state) do
+    Logger.warning("Insight background job stopped: #{inspect(reason)}")
+    {:noreply, finish_job(state, nil)}
+  end
+
+  def handle_info({:job_timeout, ref}, %{job_ref: ref, job_pid: pid} = state) do
+    Process.exit(pid, :kill)
+    Logger.warning("Insight background job exceeded #{@job_timeout_ms}ms and was stopped")
+    {:noreply, finish_job(state, nil)}
   end
 
   def handle_info(_message, state), do: {:noreply, state}
 
   @impl true
-  def handle_call(:peek, _from, state) do
-    {:reply, view(state), state}
-  end
+  def handle_call({:resolve, context}, from, state) do
+    cond do
+      usable?(state, context.plan.action) ->
+        {:reply, view(state), state}
 
-  def handle_call({:resolve, context}, _from, state) do
-    state = if usable?(state, context.plan.action), do: state, else: compute(context)
-    {:reply, view(state), state}
+      state.job_ref ->
+        {:noreply, %{state | waiters: [from | state.waiters]}}
+
+      true ->
+        job = fn -> {:ok, compute(context)} end
+        {:noreply, start_job(state, job, from)}
+    end
   end
 
   defp refresh_from_database do
@@ -77,11 +132,10 @@ defmodule GoldBackend.Services.InsightCache do
 
     case TradingController.build_context(translate_timeout: 8_000) do
       {:ok, context} ->
-        compute(context)
+        {:ok, compute(context)}
 
       {:error, reason} ->
-        Logger.warning("Insight refresh skipped: #{reason}")
-        empty_state()
+        {:error, reason}
     end
   end
 
@@ -109,6 +163,36 @@ defmodule GoldBackend.Services.InsightCache do
     fresh?(state.generated_at, state.action, action)
   end
 
+  defp start_job(state, fun, waiter \\ nil) do
+    task = Task.Supervisor.async_nolink(GoldBackend.TaskSupervisor, fun)
+    Process.send_after(self(), {:job_timeout, task.ref}, @job_timeout_ms)
+
+    waiters = if waiter, do: [waiter | state.waiters], else: state.waiters
+    %{state | job_ref: task.ref, job_pid: task.pid, waiters: waiters}
+  end
+
+  defp finish_job(state, cache) do
+    next_state =
+      state
+      |> maybe_store(cache)
+      |> Map.merge(%{job_ref: nil, job_pid: nil, waiters: []})
+
+    response = view(next_state)
+    Enum.each(state.waiters, &GenServer.reply(&1, response))
+    publish(next_state)
+    next_state
+  end
+
+  defp maybe_store(state, nil), do: state
+
+  defp maybe_store(state, cache) do
+    Map.merge(state, Map.take(cache, [:insight, :error, :generated_at, :action]))
+  end
+
+  defp publish(state) do
+    :ets.insert(@table, {:cache, Map.take(state, [:insight, :error, :generated_at, :action])})
+  end
+
   defp view(state) do
     if fresh?(state.generated_at, state.action, state.action) do
       %{
@@ -125,7 +209,17 @@ defmodule GoldBackend.Services.InsightCache do
   defp blank,
     do: %{ai_insight: nil, ai_error: nil, ai_cached_at: nil, ai_ttl_seconds: @ttl_seconds}
 
-  defp empty_state, do: %{insight: nil, error: nil, generated_at: nil, action: nil}
+  defp empty_state do
+    %{
+      insight: nil,
+      error: nil,
+      generated_at: nil,
+      action: nil,
+      job_ref: nil,
+      job_pid: nil,
+      waiters: []
+    }
+  end
 
   defp schedule do
     Process.send_after(self(), :refresh, @interval_ms)

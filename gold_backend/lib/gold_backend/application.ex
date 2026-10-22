@@ -7,6 +7,7 @@ defmodule GoldBackend.Application do
       [
         GoldBackend.Repo,
         {Phoenix.PubSub, name: GoldBackend.PubSub},
+        {Task.Supervisor, name: GoldBackend.TaskSupervisor},
         GoldBackendWeb.Endpoint
       ] ++ price_fetcher()
 

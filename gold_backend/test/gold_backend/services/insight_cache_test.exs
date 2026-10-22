@@ -1,5 +1,5 @@
 defmodule GoldBackend.Services.InsightCacheTest do
-  use ExUnit.Case, async: true
+  use ExUnit.Case, async: false
 
   alias GoldBackend.Services.InsightCache
 
@@ -26,5 +26,23 @@ defmodule GoldBackend.Services.InsightCacheTest do
 
   test "interval is five minutes" do
     assert InsightCache.interval_seconds() == 300
+  end
+
+  test "peek reads the snapshot without waiting for the GenServer mailbox" do
+    pid = start_supervised!(InsightCache)
+    :sys.suspend(pid)
+
+    try do
+      result = Task.async(&InsightCache.peek/0) |> Task.await(100)
+
+      assert result == %{
+               ai_insight: nil,
+               ai_error: nil,
+               ai_cached_at: nil,
+               ai_ttl_seconds: 300
+             }
+    after
+      :sys.resume(pid)
+    end
   end
 end
