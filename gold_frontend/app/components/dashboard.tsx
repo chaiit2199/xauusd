@@ -251,7 +251,7 @@ export function Dashboard() {
             <p className="banner">{view.news_digest}</p>
           ) : null}
 
-          <TradeTicket plan={view.cfd_plan} />
+          <TradeTicket plan={view.cfd_plan} aiAction={view.ai_action} />
 
           <section className="hero">
             <div>

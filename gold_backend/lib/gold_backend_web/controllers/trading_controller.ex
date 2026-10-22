@@ -102,6 +102,7 @@ defmodule GoldBackendWeb.TradingController do
     context = %{context | plan: plan}
 
     Map.merge(public_snapshot(context), %{
+      ai_action: if(is_nil(error), do: Atom.to_string(action), else: nil),
       ai_insight: insight,
       ai_error: error,
       ai_cached_at: DateTime.utc_now() |> DateTime.truncate(:second) |> DateTime.to_iso8601(),

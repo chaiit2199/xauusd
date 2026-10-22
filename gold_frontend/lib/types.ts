@@ -110,6 +110,7 @@ export type MarketBoard = {
   news_digest?: string | null;
   events: CalendarEvent[];
   analysis_interval_seconds?: number;
+  ai_action?: "buy" | "sell" | "wait" | null;
   ai_insight?: string | null;
   ai_error?: string | null;
   ai_cached_at?: string | null;

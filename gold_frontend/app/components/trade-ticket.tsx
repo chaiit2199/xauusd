@@ -3,9 +3,10 @@ import { money } from "../../lib/format";
 
 type TradeTicketProps = {
   plan: CfdPlan;
+  aiAction?: CfdPlan["action"] | null;
 };
 
-export function TradeTicket({ plan }: TradeTicketProps) {
+export function TradeTicket({ plan, aiAction }: TradeTicketProps) {
   const tone = plan.risk_score >= 7 ? "high" : plan.risk_score >= 4 ? "mid" : "low";
 
   const order = plan.action !== "wait";
@@ -18,6 +19,7 @@ export function TradeTicket({ plan }: TradeTicketProps) {
         <div className={plan.action === "sell" ? "choice on sell" : "choice"}>Bán</div>
         <div className={plan.action === "wait" ? "choice on wait" : "choice"}>Không giao dịch</div>
       </div>
+      <p className="ticket-summary">AI đề xuất: {aiAction ? actionLabel(aiAction) : "Chưa có quyết định AI hợp lệ"}{aiAction && aiAction !== plan.action ? ` · Đã chuyển sang ${actionLabel(plan.action)}: ${plan.block_reason}` : ""}</p>
       {plan.news_tone ? <p className="ticket-news">{plan.news_tone}</p> : null}
       <div className="ticket-top">
         <p className="ticket-summary">{plan.summary}</p>
@@ -106,4 +108,8 @@ export function TradeTicket({ plan }: TradeTicketProps) {
 
 function times(value: number) {
   return `${value.toFixed(2).replace(".", ",")} lần`;
+}
+
+function actionLabel(action: CfdPlan["action"]) {
+  return action === "buy" ? "Mua" : action === "sell" ? "Bán" : "Không giao dịch";
 }
