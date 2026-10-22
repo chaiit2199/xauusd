@@ -8,6 +8,9 @@ defmodule GoldBackendWeb.TradingController do
   alias GoldBackend.Services.{
     AiDecision,
     CandleClock,
+    CandleStore,
+    GoldOhlc,
+    OhlcContext,
     M15Signal,
     EconomicCalendar,
     Indicators,
@@ -24,7 +27,6 @@ defmodule GoldBackendWeb.TradingController do
   # Seed supports display only. Trading requires 50 closed live H1 samples
   # and a confirmed provider M15 setup. Synthetic quotes remain warmup data.
   @live_origins ~w(metals_dev gold_api)
-  @min_live_ticks 3
 
   def trigger_crawl_news(conn, _params) do
     sources = NewsCrawler.fetch_and_save_all()
@@ -136,34 +138,62 @@ defmodule GoldBackendWeb.TradingController do
 
   defp market_context(opts) do
     now = Keyword.get(opts, :as_of, DateTime.utc_now()) |> CandleClock.closed_at()
+    m15 = Keyword.get_lazy(opts, :m15_candles, fn -> CandleStore.load(900, now) end)
+    h1 = Keyword.get_lazy(opts, :h1_candles, fn -> CandleStore.load(3600, now) end)
+    ohlc = OhlcContext.build(m15, h1, now)
+    feed = Keyword.get(opts, :ohlc_feed, %{status: "stored", error: nil})
+
+    feed =
+      Map.merge(feed, %{
+        source: "gold_api_ohlc",
+        configured: GoldOhlc.configured?(),
+        m15_count: length(m15),
+        h1_count: length(h1),
+        required: 50,
+        latest_m15_closed_at: if(ohlc, do: ohlc.m15_closed_at, else: nil)
+      })
 
     prices =
       prices_since(DateTime.add(now, -5, :day))
       |> Enum.filter(&(DateTime.compare(&1.timestamp, now) == :lt))
 
+    prices = if ohlc, do: ohlc.prices, else: prices
     h1_end = CandleClock.closed_at(now, 3600)
     closed_h1 = Enum.filter(prices, &(DateTime.compare(&1.timestamp, h1_end) == :lt))
 
-    if prices == [] or closed_h1 == [] do
-      {:error, "Chưa có dữ liệu giá vàng trong 5 ngày."}
+    if prices == [] or (closed_h1 == [] and is_nil(ohlc)) do
+      {:error, feed.error || "Đang tích lũy OHLC M15/H1 từ Gold API."}
     else
       news =
         news_since(DateTime.add(now, -3, :day))
         |> NewsTranslator.ensure_vietnamese(timeout: Keyword.get(opts, :translate_timeout, 8_000))
 
       latest = Enum.max_by(prices, & &1.timestamp, DateTime)
-      live_h1 = Enum.filter(closed_h1, &(&1.origin in @live_origins))
-      summary = Indicators.summarize(if(live_h1 == [], do: closed_h1, else: live_h1))
-      h1_ready = live_h1 != [] and summary.hourly_samples >= 50
+      live_h1 = Enum.filter(closed_h1, &(&1.origin in ["gold_api_ohlc" | @live_origins]))
+
+      summary =
+        if ohlc,
+          do: ohlc.summary,
+          else: Indicators.summarize(if(live_h1 == [], do: closed_h1, else: live_h1))
+
+      h1_ready = not is_nil(ohlc) and ohlc.h1_ready
       entry = latest.price |> Decimal.round(2) |> Decimal.to_float()
-      live_ticks = Enum.count(prices, &(&1.origin in @live_origins))
+      live_ticks = Enum.count(prices, &(&1.origin in ["gold_api_ohlc" | @live_origins]))
 
       {warmup, warmup_detail} =
-        if h1_ready,
-          do: warmup_state(latest, live_ticks),
-          else: {true, "Chờ đủ 50 nến H1 đã đóng từ giá thị trường để xác định xu hướng."}
+        cond do
+          feed.error ->
+            {true, feed.error}
 
-      m15_setup = M15Signal.assess(Keyword.get(opts, :m15_candles, []), summary.indicators, now)
+          not h1_ready ->
+            {true,
+             "Đang tích lũy OHLC Gold API: M15 #{length(m15)}/50, H1 #{length(h1)}/50; cần H1 mới nhất đã đóng."}
+
+          true ->
+            {false, nil}
+        end
+
+      m15_setup = M15Signal.assess(m15, summary.indicators, now)
       events = EconomicCalendar.upcoming_usd(now)
       blocking = EconomicCalendar.blocking(events, now)
       news_bias = NewsBias.assess(news, now)
@@ -183,6 +213,7 @@ defmodule GoldBackendWeb.TradingController do
        %{
          latest: latest,
          analysis_at: now,
+         ohlc_feed: feed,
          m15_setup: m15_setup,
          prices: prices,
          news: news,
@@ -206,7 +237,8 @@ defmodule GoldBackendWeb.TradingController do
     values =
       prices
       |> Enum.filter(
-        &(&1.timestamp >= cutoff and &1.timestamp <= now and &1.origin in @live_origins)
+        &(&1.timestamp >= cutoff and &1.timestamp <= now and
+            &1.origin in ["gold_api_ohlc" | @live_origins])
       )
       |> Enum.sort_by(& &1.timestamp, DateTime)
       |> Enum.map(&(&1.price |> Decimal.round(4) |> Decimal.to_float()))
@@ -225,27 +257,6 @@ defmodule GoldBackendWeb.TradingController do
     }
   end
 
-  defp warmup_state(latest, live_ticks) do
-    live? = latest.origin in @live_origins
-
-    cond do
-      not live? and latest.origin == "seed" ->
-        {true,
-         "Giá hiện tại vẫn là dữ liệu khởi tạo (seed). Cần ~5 ngày mẫu giờ để SMA20/EMA50/ATR ổn định; seed chỉ lấp chỗ trống lúc mở hệ thống. Chưa vào lệnh đến khi có giá thị trường thật."}
-
-      not live? ->
-        {true,
-         "Giá hiện tại là giá nội bộ (synthetic) vì nguồn thị trường tạm lỗi. Chưa vào lệnh cho đến khi lấy lại được giá live."}
-
-      live_ticks < @min_live_ticks ->
-        {true,
-         "Mới có #{live_ticks}/#{@min_live_ticks} tick giá thị trường thật. Lịch sử 5 ngày (gồm seed) dùng để tính chỉ báo; phiếu lệnh mở sau khi có đủ giá live liên tục."}
-
-      true ->
-        {false, nil}
-    end
-  end
-
   defp public_snapshot(context) do
     latest = context.latest
 
@@ -258,7 +269,12 @@ defmodule GoldBackendWeb.TradingController do
       live_price_ticks: context.live_price_ticks,
       hourly_samples: context.summary.hourly_samples,
       indicator_basis:
-        "Giá đóng cửa H1 từ các mẫu báo giá; chỉ dùng giờ đã kết thúc · H1 định hướng, M15 xác nhận điểm vào",
+        if(latest.origin == "gold_api_ohlc",
+          do:
+            "OHLC XAU/USD từ Gold API · H1 định hướng, M15 xác nhận điểm vào · ATR từ High/Low/Close",
+          else: "Báo giá tham khảo; đang chờ OHLC Gold API đủ để phân tích H1/M15"
+        ),
+      ohlc_feed: Map.get(context, :ohlc_feed),
       warmup: context.warmup,
       warmup_detail: context.warmup_detail,
       recent_prices: recent_prices(context.prices),

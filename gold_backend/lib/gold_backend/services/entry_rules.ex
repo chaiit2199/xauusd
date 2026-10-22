@@ -5,7 +5,7 @@ defmodule GoldBackend.Services.EntryRules do
   Retests use ordered live quotes, not inferred candle patterns or extrema.
   """
 
-  def assess(i, side, price_action \\ %{}) when side in [:buy, :sell] do
+  def assess(i, side, price_action \\ %{}, opts \\ []) when side in [:buy, :sell] do
     atr = max(i.atr_14, 0.5)
     near = 0.25 * atr
     price = i.current_price
@@ -33,6 +33,7 @@ defmodule GoldBackend.Services.EntryRules do
     # can substitute only after an observed break -> retest -> continuation.
     sma_zone? = abs(price - i.sma_20) <= 0.5 * atr
     retest_zone? = retest == :confirmed and abs(price - level) <= 0.5 * atr
+    sweep_zone? = confirmed_sweep?(Keyword.get(opts, :m15_setup), side)
 
     opposing_levels =
       if sell?, do: [i.pivot_level.s1, i.pivot_level.p], else: [i.pivot_level.r1, i.pivot_level.p]
@@ -68,12 +69,25 @@ defmodule GoldBackend.Services.EntryRules do
         "Chờ RSI về vùng #{if sell?, do: "45–55 để bán khi hồi", else: "45–50 để mua khi điều chỉnh"}."
       )
       |> add(
-        not (sma_zone? or retest_zone?),
+        not (sma_zone? or retest_zone? or sweep_zone?),
         "Chờ giá về trong 0,5 ATR của SMA20 hoặc vùng #{barrier} đã retest; chưa mở lệnh thị trường."
       )
 
     %{blocked: reasons != [], reasons: reasons}
   end
+
+  # Only the closed-candle engine can supply a confirmed sweep. This replaces
+  # the pullback location requirement, not the remaining anti-chasing checks.
+  defp confirmed_sweep?(
+         %{blocked: false, action: "sell", pattern: "bearish_sweep_pinbar"},
+         :sell
+       ),
+       do: true
+
+  defp confirmed_sweep?(%{blocked: false, action: "buy", pattern: "bullish_sweep_pinbar"}, :buy),
+    do: true
+
+  defp confirmed_sweep?(_, _), do: false
 
   def trend(i) do
     cond do

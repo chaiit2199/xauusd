@@ -57,12 +57,20 @@ Stochastic, Bollinger và khoảng cách SMA20 cho điểm vào dùng chỉ báo
 | Vùng cản đối diện | Cách S1/Pivot phía dưới ≤ 0,25 ATR | Cách R1/Pivot phía trên ≤ 0,25 ATR |
 | Vị trí chờ vào | Trong 0,5 ATR của SMA20 hoặc S1 đã retest | Trong 0,5 ATR của SMA20 hoặc R1 đã retest |
 
+Ngoại lệ cho **vị trí chờ vào**: nếu bộ máy M15 đã xác nhận sweep + pinbar
+cùng hướng lệnh (`blocked: false` và đúng `pattern`/`action`), vùng sweep được
+chấp nhận thay cho yêu cầu gần SMA20 hoặc vùng retest. Không áp dụng ngoại lệ
+cho mẫu đang chờ, sai hướng hay thiếu OHLC. Các khóa RSI (kể cả vùng reset),
+Stochastic, Bollinger, cách SMA20 hơn 2 ATR, vùng cản và phá S1/R1 chưa retest
+vẫn giữ nguyên, cùng các kiểm tra H1, tin tức và SL/TP. Đây là nới một điều kiện
+vị trí, chưa phải triển khai thêm chiến lược hay kết quả backtest.
+
 Nếu giá đã thủng S1 hoặc vượt R1, cần quan sát lần lượt phá mức → quay lại trong
-±0,25 ATR → tiếp diễn qua mức hơn 0,25 ATR. Dùng các báo giá thị trường thật,
-sắp theo thời gian trong 90 phút; không suy ra retest từ High/Low. Thiếu chuỗi
+±0,25 ATR → tiếp diễn qua mức hơn 0,25 ATR. Khi OHLC sẵn sàng, dùng chuỗi giá
+đóng M15 cùng nguồn trong 90 phút; không suy ra retest chỉ từ High/Low. Thiếu chuỗi
 hoặc chuỗi bắt đầu sau lúc phá mức thì chưa xác nhận được retest. Một lần phá
 mới sau khi giá quay lại phía đối diện làm mất xác nhận cũ. Đây là xác nhận trên
-mẫu giá; hệ thống chưa có OHLC để tự xác nhận mẫu nến H1.
+mẫu giá đóng cửa, không phải xác nhận đường đi của từng tick trong nến.
 
 Khi chờ, chỉ hiện kịch bản cùng xu hướng: Sell Limit phía trên giá hiện tại hoặc
 Buy Limit phía dưới, quanh SMA20 trong 0,5 ATR. SL/TP tham chiếu tính lại từ vùng
@@ -71,46 +79,74 @@ và vẫn yêu cầu kiểm tra lại điều kiện, xác nhận nến M15 trư
 khởi tạo không xuất vùng đặt lệnh chờ.
 
 Quy ước 0,25 / 0,5 / 2 ATR cụ thể hóa các khái niệm “sát vùng”, “hồi về” và “quá
-xa”; đây là tham số chiến lược, chưa phải kết quả tối ưu hoặc backtest. ATR H1
-là trung bình biến động giá đóng cửa từ mẫu báo giá. ATR M15 là trung bình 14
-True Range từ OHLC; bộ lọc điểm vào dùng sàn 0,5 USD. Mọi vùng giá tính từ dữ liệu hiện tại.
+xa”; đây là tham số chiến lược, chưa phải kết quả tối ưu hoặc backtest. Khi nguồn OHLC sẵn sàng, ATR H1 và M15 đều là trung bình 14
+True Range từ High/Low/Close; bộ lọc điểm vào dùng sàn 0,5 USD. Mọi vùng giá tính từ dữ liệu hiện tại.
 
 Quá mua/quá bán không bảo đảm đảo chiều; mục tiêu của bộ lọc là tránh vào đuổi,
 không chứng minh một lệnh chắc chắn có lợi nhuận. Tham khảo
 [Fidelity về RSI trong xu hướng mạnh](https://www.fidelity.com/learning-center/trading-investing/technical-analysis/technical-indicator-guide/RSI).
 
-## Chu kỳ M15 và nguồn OHLC đang chờ kết nối
+## Luồng OHLC M15/H1 từ Gold API
 
-`InsightCache` kích hoạt tại :00, :15, :30, :45 theo đồng hồ UTC, không tính
-15 phút từ lúc khởi động hoặc lúc AI trả lời. Khi khởi động, chờ mốc kế tiếp.
-Không chạy chồng tác vụ và không chạy lại cùng mốc trong một tiến trình.
-Kết quả hoàn tất sang chu kỳ sau bị loại; snapshot cũ chuyển sang `wait` khi
-hết hạn, Telegram cũng kiểm tra hạn trước khi gửi. Giao diện đếm ngược theo
-`ai_next_analysis_at`, không theo thời điểm nhận phản hồi. Đây là lịch kích hoạt,
-không bảo đảm AI hoàn tất ngay giây đóng nến.
+Nguồn: [Gold API](https://gold-api.com/docs), endpoint `/ohlc/XAU`.
+Mỗi request trả một nến cho khoảng thời gian được yêu cầu. Gói miễn phí hiện
+cho 10 request lịch sử/OHLC mỗi giờ và cần API key; xem
+[tài liệu endpoint](https://gold-api.com/llms.txt) và [hạn mức](https://gold-api.com/pricing).
+Ứng dụng không tự đăng ký tài khoản, mua gói hoặc đọc key từ chat.
 
-H1 chỉ lấy các giờ đã kết thúc, cần ít nhất 50 mẫu giờ từ nguồn giá thật.
-H1 hiện vẫn là giá đóng cửa gần đúng từ báo giá định kỳ, chưa phải OHLC broker.
-M15 chỉ nhận OHLC từ nguồn sẽ được cung cấp; không nội suy râu nến từ báo giá
-3 phút. Hiện chưa có adapter nguồn chạy tự động, nên bộ kiểm tra M15 trả `wait`.
+Thiết lập `GOLD_API_KEY` trong `env.sh` trên VPS, rồi build/deploy mã mới.
+Compose đã truyền biến này vào API; `deploy.sh` chạy migration tạo hai bảng
+`market_candles` và `ohlc_requests` trước khi khởi động container.
+Nếu chạy local, đặt biến trong môi trường shell và chạy `mix ecto.migrate`.
+Không đưa key vào Git. Kiểm tra trạng thái mà không in key:
 
-Điểm nối cho adapter là `TradingController.build_context(m15_candles: candles,
-as_of: candle_close)`. Mỗi phần tử cần đúng cấu trúc:
-
-```elixir
-%{
-  open_time: ~U[2026-10-21 14:45:00Z],
-  open: 4100.2, high: 4104.0, low: 4099.0, close: 4100.0,
-  confirmed: true
-}
+```bash
+docker exec xauusd-api-1 /app/bin/gold_backend rpc \
+  'IO.inspect(GoldBackend.Services.GoldOhlc.configured?())'
 ```
 
-Giá phải là số dương theo USD/oz, `open_time` là thời điểm **mở** nến UTC
-đúng mốc 15 phút. Adapter cần chuẩn hóa timestamp, Decimal/chuỗi số và trạng
-thái đóng nến của nhà cung cấp. Cần 50 nến đã đóng liên tục, không trùng/thiếu,
-và nến cuối phải kết thúc đúng mốc phân tích. Nến đang chạy bị bỏ qua, kể cả
-trong 3–5 phút cuối. Adapter tương lai cần lấy các nến này trước khi gọi
-`build_context`; hiện scheduler chưa gọi dịch vụ OHLC nào.
+`true` chỉ xác nhận có cấu hình, chưa chứng minh key được nhà cung cấp chấp nhận.
+
+Luồng chạy tự động:
+
+1. `InsightCache` kích hoạt **35 giây sau** mốc :00/:15/:30/:45 để nguồn có thời
+   gian cập nhật nến đã đóng. Khi khởi động, chờ mốc kế tiếp. Không chạy chồng tác vụ.
+2. `OhlcSync` kiểm tra `/price/XAU`: đúng XAU/USD và timestamp của nguồn không
+   cũ hơn 120 giây. Báo giá cũ/nguồn lỗi không được coi là thị trường đang hoạt động.
+3. Lấy nến M15 vừa đóng, sau đó bổ sung một nến H1 còn thiếu. Khi đã có 50 H1 và
+   giờ H1 mới nhất, dung lượng còn lại dùng để sửa khoảng trống M15 trong 50 nến gần nhất.
+4. `GoldOhlc` gửi API key qua header, dùng timestamp UTC, kiểm tra biên thời gian
+   phản hồi, giá dương và quan hệ High/Low/Open/Close. Khoảng truy vấn kết thúc
+   ở giây cuối của nến; không lấy dữ liệu từ nến tiếp theo. Không dựng râu nến từ
+   báo giá 3 phút, seed hoặc synthetic.
+5. `CandleStore` upsert theo nguồn + khung thời gian + giờ mở nến. Lịch sử và bộ
+   đếm lượt gọi lưu PostgreSQL, không mất khi ứng dụng khởi động lại.
+6. Controller đọc OHLC đã lưu để tính H1 và M15 cùng nguồn. Giá vào tham chiếu
+   là giá đóng M15; giao diện ghi rõ đây là giá đóng nến, không phải báo giá khớp lệnh.
+
+Tối đa hai request OHLC mỗi chu kỳ và **8 request trong một giờ trượt** cho ứng
+dụng. Dành chỗ cho lần gọi thất bại và tránh sát trần gói miễn phí; các ứng dụng
+khác dùng chung key vẫn có thể làm hết quota. Mỗi lượt được đặt chỗ trong DB
+trước khi gọi HTTP, có khóa transaction cho nhiều instance. HTTP 401/403/429
+làm tạm dừng gọi OHLC một giờ. Lỗi không được lưu thành nến; khoảng lịch sử trả
+OHLC không hợp lệ được bỏ qua sáu giờ để không kẹt mãi ở một giờ nghỉ thị trường.
+
+**Khởi tạo cần thời gian:** từ DB trống, mỗi chu kỳ lấy tối đa một M15 và một H1.
+Trong điều kiện nguồn liên tục có dữ liệu, cần khoảng **50 chu kỳ ≈ 12,5 giờ**
+để có 50 nến mỗi khung. Lỗi mạng, quota và giờ thị trường đóng cửa làm lâu hơn.
+Không cam kết thời điểm có lệnh. Giao diện hiển thị số M15/H1 đã lưu và lỗi nguồn.
+M15 vẫn yêu cầu 50 nến liên tục, mới nhất đúng mốc phân tích; khoảng nghỉ/gap
+trong cửa sổ đó giữ `wait` cho đến khi có chuỗi hợp lệ. H1 cần 50 nến và giờ
+đã đóng mới nhất. Dữ liệu cũ chỉ phục vụ hiển thị khi nguồn không sẵn sàng.
+
+Kết quả AI sang chu kỳ sau bị loại; snapshot hết hạn chuyển `wait`, Telegram
+kiểm tra hạn trước khi gửi. Đồng hồ trên UI đếm đến mốc nến tiếp theo, sau đó
+chờ lấy dữ liệu và phân tích. Nến đang chạy bị bỏ qua kể cả trong 3–5 phút cuối.
+OHLC đầy đủ cải thiện dữ liệu đầu vào, không chứng minh chiến lược có lợi nhuận.
+
+Các kiểm thử parser và đồng bộ dùng HTTP giả lập; test database nằm ở
+`test/gold_backend/candle_store_test.exs` và cần PostgreSQL test qua `mix test`.
+Kết nối OHLC thật chỉ có thể xác minh sau khi đặt key hợp lệ.
 
 `M15Signal` kiểm tra chiến lược quét thanh khoản đối xứng BUY/SELL:
 

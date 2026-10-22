@@ -184,6 +184,82 @@ defmodule GoldBackend.Services.EntryRulesTest do
     assert zone.side == "sell"
   end
 
+  test "confirmed sweeps replace only the pullback location requirement on both sides" do
+    for side <- [:buy, :sell] do
+      i = away_from_sma(side)
+      setup = sweep(i, side)
+      assert %{blocked: true, reasons: [reason]} = EntryRules.assess(i, side)
+      assert reason =~ "0,5 ATR"
+      assert %{blocked: false, reasons: []} = EntryRules.assess(i, side, %{}, m15_setup: setup)
+
+      legacy = TradePlan.build(i, i.current_price, ai_action: side)
+      assert legacy.action == "wait"
+      plan = TradePlan.build(i, i.current_price, ai_action: side, m15_setup: setup)
+      assert plan.action == Atom.to_string(side)
+      assert plan.stop_loss == setup.stop_loss
+    end
+  end
+
+  test "missing, pending, unknown and wrong-side setups do not waive the location check" do
+    for side <- [:buy, :sell] do
+      i = away_from_sma(side)
+      setup = sweep(i, side)
+      other = if side == :buy, do: :sell, else: :buy
+
+      for candidate <- [
+            nil,
+            %{setup | blocked: true},
+            %{setup | pattern: nil},
+            %{setup | pattern: "breakout"},
+            %{setup | action: Atom.to_string(other)},
+            sweep(i, other)
+          ] do
+        result = EntryRules.assess(i, side, %{}, m15_setup: candidate)
+        assert result.blocked
+        assert Enum.any?(result.reasons, &String.contains?(&1, "0,5 ATR"))
+      end
+    end
+  end
+
+  test "confirmed sweeps still obey RSI, stochastic, stretch and unconfirmed pivot breaks" do
+    for side <- [:buy, :sell] do
+      i = away_from_sma(side)
+
+      for {changes, reason} <- [
+            {%{rsi_14: if(side == :sell, do: 34.0, else: 66.0)}, "RSI"},
+            {%{rsi_14: if(side == :sell, do: 44.0, else: 51.0)}, "Chờ RSI"},
+            {%{stochastic_k: if(side == :sell, do: 29.0, else: 76.0)}, "Stochastic"},
+            {%{sma_20: i.current_price + if(side == :sell, do: 2.1, else: -2.1)}, "hơn 2 ATR"},
+            {%{pivot_level: %{s1: 100.0, r1: 100.0, p: 105.0}}, "chưa xác nhận retest"}
+          ] do
+        changed = Map.merge(i, changes)
+        result = EntryRules.assess(changed, side, %{}, m15_setup: sweep(changed, side))
+        assert result.blocked
+        assert Enum.any?(result.reasons, &String.contains?(&1, reason))
+
+        assert TradePlan.build(changed, changed.current_price,
+                 ai_action: side,
+                 m15_setup: sweep(changed, side)
+               ).action == "wait"
+      end
+    end
+  end
+
+  defp away_from_sma(side) do
+    %{indicators(side) | sma_20: if(side == :sell, do: 101.0, else: 99.0)}
+  end
+
+  defp sweep(i, side) do
+    %{
+      blocked: false,
+      action: Atom.to_string(side),
+      indicators: i,
+      atr: i.atr_14,
+      pattern: if(side == :sell, do: "bearish_sweep_pinbar", else: "bullish_sweep_pinbar"),
+      stop_loss: i.current_price + if(side == :sell, do: 3.0, else: -3.0)
+    }
+  end
+
   defp indicators(side) do
     sell? = side == :sell
 

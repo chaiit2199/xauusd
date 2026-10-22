@@ -35,6 +35,7 @@ export function MarketOverview({ board }: { board: MarketBoard }) {
   const delta = prices.length > 1 && first > 0 ? last - first : null;
   const percent = delta === null ? null : (delta / first) * 100;
   const simulated = board.price_origin === "synthetic" || board.price_origin === "seed";
+  const candles = board.price_origin === "gold_api_ohlc";
   const changeTone = delta === null || delta === 0 ? "" : delta > 0 ? "up-text" : "down-text";
 
   return (
@@ -48,7 +49,7 @@ export function MarketOverview({ board }: { board: MarketBoard }) {
           <span className={simulated ? "pill warn" : "pill"}>{originLabel(board.price_origin)}</span>
           <span>Báo giá lúc {when(board.as_of)}</span>
         </div>
-        <p className="quote-cadence">Giá cập nhật mỗi 3 phút · Bảng giá làm mới mỗi 60 giây</p>
+        <p className="quote-cadence">{candles ? "Giá đóng nến M15 dùng cho phân tích" : "Giá cập nhật mỗi 3 phút"} · Bảng giá làm mới mỗi 60 giây</p>
       </div>
 
       <figure className="quote-chart">
@@ -85,11 +86,11 @@ export function MarketOverview({ board }: { board: MarketBoard }) {
       <details className="quote-details">
         <summary>Phạm vi và nguồn dữ liệu</summary>
         <p className="basis">
-          Thống kê theo các mẫu trên biểu đồ, có thể gồm giá khởi tạo hoặc mô phỏng.
+          {candles ? "Thống kê theo giá đóng các nến M15 trên biểu đồ; không phải High/Low của nến." : "Thống kê theo các mẫu trên biểu đồ, có thể gồm giá khởi tạo hoặc mô phỏng."}
           Chưa có thống kê 24 giờ, cao/thấp trong ngày và spread trực tiếp từ sàn.
         </p>
         <p className="basis">
-          {board.price_ticks_5d} mẫu giá / 5 ngày
+          {board.price_ticks_5d} {candles ? "nến M15 đã lưu" : "mẫu giá / 5 ngày"}
           {typeof board.live_price_ticks === "number" ? ` · ${board.live_price_ticks} mẫu thị trường` : ""}
           {` · ${board.hourly_samples} mẫu giờ · ${board.indicator_basis}`}
         </p>

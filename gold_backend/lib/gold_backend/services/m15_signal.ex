@@ -166,13 +166,8 @@ defmodule GoldBackend.Services.M15Signal do
   end
 
   defp indicators(bars, atr) do
-    ticks = Enum.map(bars, &%{timestamp: &1.open_time, price: Decimal.from_float(&1.close * 1.0)})
-    i = Indicators.summarize(ticks, 900).indicators
-    recent = Enum.take(bars, -14)
-    high = recent |> Enum.map(& &1.high) |> Enum.max()
-    low = recent |> Enum.map(& &1.low) |> Enum.min()
-    k = if high == low, do: 50.0, else: (List.last(bars).close - low) / (high - low) * 100
-    %{i | atr_14: Float.round(atr, 2), stochastic_k: Float.round(k, 2)}
+    i = Indicators.summarize_candles(bars, 900).indicators
+    %{i | atr_14: Float.round(atr, 2)}
   end
 
   def divergence(bars) do

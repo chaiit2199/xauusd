@@ -23,6 +23,63 @@ defmodule GoldBackend.Services.Indicators do
     }
   end
 
+  def summarize_candles(bars, seconds) when is_list(bars) and length(bars) > 0 do
+    bars = Enum.sort_by(bars, & &1.open_time, DateTime)
+    ticks = Enum.map(bars, &%{timestamp: &1.open_time, price: Decimal.from_float(&1.close * 1.0)})
+    summary = summarize(ticks, seconds)
+
+    ranges =
+      bars
+      |> Enum.chunk_every(2, 1, :discard)
+      |> Enum.take(-14)
+      |> Enum.map(fn [a, b] ->
+        max(b.high - b.low, max(abs(b.high - a.close), abs(b.low - a.close)))
+      end)
+
+    atr =
+      if ranges == [], do: hd(bars).high - hd(bars).low, else: Enum.sum(ranges) / length(ranges)
+
+    recent = Enum.take(bars, -14)
+    high = recent |> Enum.map(& &1.high) |> Enum.max()
+    low = recent |> Enum.map(& &1.low) |> Enum.min()
+    last = List.last(bars)
+    k = if high == low, do: 50.0, else: (last.close - low) / (high - low) * 100
+    # Previous available UTC day, or preceding bars during initial warmup.
+    earlier =
+      Enum.filter(
+        bars,
+        &(Date.compare(DateTime.to_date(&1.open_time), DateTime.to_date(last.open_time)) == :lt)
+      )
+
+    prior =
+      if earlier == [] do
+        case Enum.drop(bars, -1) do
+          [] -> [last]
+          values -> values
+        end
+      else
+        day = List.last(earlier).open_time |> DateTime.to_date()
+        Enum.filter(earlier, &(DateTime.to_date(&1.open_time) == day))
+      end
+
+    ph = prior |> Enum.map(& &1.high) |> Enum.max()
+    pl = prior |> Enum.map(& &1.low) |> Enum.min()
+    p = (ph + pl + List.last(prior).close) / 3
+
+    i = %{
+      summary.indicators
+      | atr_14: round_num(atr, 2),
+        stochastic_k: round_num(k, 2),
+        pivot_level: %{
+          p: round_num(p, 2),
+          r1: round_num(2 * p - pl, 2),
+          s1: round_num(2 * p - ph, 2)
+        }
+    }
+
+    %{summary | indicators: i, alerts: alerts(i)}
+  end
+
   def alerts(indicators) do
     price = indicators.current_price
     bands = indicators.bollinger_bands

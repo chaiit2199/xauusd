@@ -39,7 +39,12 @@ defmodule GoldBackend.Services.TradePlan do
       if requested in [:buy, :sell, :wait], do: requested, else: action(indicators, lean)
 
     news_bias = Keyword.get(opts, :news_bias)
-    entry_guard = EntryRules.assess(entry_indicators, lean, Keyword.get(opts, :price_action, %{}))
+
+    entry_guard =
+      EntryRules.assess(entry_indicators, lean, Keyword.get(opts, :price_action, %{}),
+        m15_setup: m15
+      )
+
     opts = Keyword.put(opts, :h1_indicators, h1_indicators)
     block = block_reason(opts, rr_after_spread, signal_action, indicators, news_bias, entry_guard)
     action = if block, do: :wait, else: signal_action

@@ -38,6 +38,8 @@ export function when(iso: string | null): string {
 
 export function originLabel(origin: string): string {
   switch (origin) {
+    case "gold_api_ohlc":
+      return "Gold API · Đóng nến M15";
     case "gold_api":
       return "Gold API";
     case "metals_dev":

@@ -273,6 +273,11 @@ export function Dashboard({ page = "overview", initialSide = "buy" }: { page?: D
           {view.m15_setup ? <section className="panel">
             <div className="panel-head"><h2>Xác nhận M15</h2><p>Mốc đóng nến {when(view.m15_setup.candle_closed_at)}</p></div>
             <p className="empty">{expired ? view.ai_error : view.m15_setup.reason}</p>
+            {view.ohlc_feed ? <p className="basis">
+              Nguồn OHLC: <a href="https://gold-api.com" target="_blank" rel="noreferrer">Gold API</a>
+              {` · M15: ${view.ohlc_feed.m15_count}/${view.ohlc_feed.required} · H1: ${view.ohlc_feed.h1_count}/${view.ohlc_feed.required} nến`}
+              {view.ohlc_feed.error ? ` · ${view.ohlc_feed.error}` : null}
+            </p> : null}
             <p className="basis">H1 định hướng · Chỉ đánh giá nến đã đóng · Mốc :00 / :15 / :30 / :45</p>
             {view.m15_setup.divergence !== "none" ? <p className="banner warn">Phân kỳ RSI {view.m15_setup.divergence === "bearish" ? "giảm" : "tăng"} · Cảnh báo, chưa phải lệnh.</p> : null}
           </section> : null}

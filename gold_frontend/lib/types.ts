@@ -128,6 +128,16 @@ export type MarketBoard = {
   analysis_candle_closed_at?: string;
   ai_next_analysis_at?: string;
   m15_setup?: M15Setup | null;
+  ohlc_feed?: {
+    source: string;
+    configured: boolean;
+    status: string;
+    error: string | null;
+    m15_count: number;
+    h1_count: number;
+    required: number;
+    latest_m15_closed_at: string | null;
+  } | null;
   ai_action?: "buy" | "sell" | "wait" | null;
   ai_insight?: string | null;
   ai_error?: string | null;

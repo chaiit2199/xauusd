@@ -1,7 +1,7 @@
 defmodule GoldBackend.Services.InsightCache do
   use GenServer
   require Logger
-  alias GoldBackend.Services.{AiDecision, CandleClock, NewsCrawler, TelegramNotifier}
+  alias GoldBackend.Services.{AiDecision, CandleClock, NewsCrawler, OhlcSync, TelegramNotifier}
   alias GoldBackendWeb.TradingController
   @table __MODULE__
   def start_link(_), do: GenServer.start_link(__MODULE__, %{}, name: __MODULE__)
@@ -94,7 +94,7 @@ defmodule GoldBackend.Services.InsightCache do
       timeout = AiDecision.max_duration_ms()
 
       # News crawling and headline translation run before the AI request budget.
-      Process.send_after(self(), {:timeout, task.ref}, timeout + 90_000)
+      Process.send_after(self(), {:timeout, task.ref}, timeout + 150_000)
       {:noreply, %{state | job: task, job_slot: slot, last_slot: slot}}
     end
   end
@@ -134,16 +134,25 @@ defmodule GoldBackend.Services.InsightCache do
 
   def handle_info(_, state), do: {:noreply, state}
 
-  defp schedule_refresh(now), do: Process.send_after(self(), :refresh, CandleClock.delay_ms(now))
+  defp schedule_refresh(now),
+    do: Process.send_after(self(), :refresh, CandleClock.delay_ms(now) + 35_000)
 
   defp compute(slot) do
+    ohlc_feed = OhlcSync.refresh(slot)
+    if ohlc_feed.error, do: Logger.warning("OHLC: #{ohlc_feed.error}")
+
     try do
       NewsCrawler.fetch_and_save_all()
     rescue
       error -> Logger.warning("News refresh failed: #{Exception.message(error)}")
     end
 
-    with {:ok, context} <- TradingController.build_context(translate_timeout: 8_000, as_of: slot) do
+    with {:ok, context} <-
+           TradingController.build_context(
+             translate_timeout: 8_000,
+             as_of: slot,
+             ohlc_feed: ohlc_feed
+           ) do
       {action, reason, error} =
         case AiDecision.analyze(context) do
           {:ok, action, reason} ->
