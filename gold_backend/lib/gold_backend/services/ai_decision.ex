@@ -45,8 +45,20 @@ defmodule GoldBackend.Services.AiDecision do
              {:ok, result} <- Jason.decode(text),
              do: parse(result)
 
-      _ ->
-        {:error, "Không kết nối được AI."}
+      {:ok, %HTTPoison.Response{status_code: 404}} ->
+        {:error,
+         "Ollama không tìm thấy model hoặc endpoint. Kiểm tra OLLAMA_MODEL và OLLAMA_URL."}
+
+      {:ok, %HTTPoison.Response{status_code: status}} ->
+        {:error, "Ollama trả lỗi HTTP #{status}."}
+
+      {:error, %HTTPoison.Error{reason: :timeout}} ->
+        {:error, "Ollama xử lý quá thời gian. Kiểm tra model và OLLAMA_TIMEOUT_MS."}
+
+      {:error, %HTTPoison.Error{reason: reason}} ->
+        require Logger
+        Logger.warning("Ollama connection failed: #{inspect(reason)}")
+        {:error, "Không kết nối được Ollama. Kiểm tra dịch vụ và OLLAMA_URL."}
     end
   rescue
     _ -> {:error, "Không đọc được kết quả AI."}
