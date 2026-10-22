@@ -13,8 +13,8 @@ defmodule GoldBackend.Services.Indicators do
     indicators
   end
 
-  def summarize(prices) when is_list(prices) and length(prices) > 0 do
-    {indicators, samples} = compute(prices)
+  def summarize(prices, seconds \\ 3600) when is_list(prices) and length(prices) > 0 do
+    {indicators, samples} = compute(prices, seconds)
 
     %{
       indicators: indicators,
@@ -54,8 +54,8 @@ defmodule GoldBackend.Services.Indicators do
     |> push("ROC 10 giảm mạnh (#{indicators.roc_10}%).", indicators.roc_10 <= -1)
   end
 
-  defp compute(prices) do
-    bars = hourly_bars(prices)
+  defp compute(prices, seconds \\ 3600) do
+    bars = time_bars(prices, seconds)
     closes = Enum.map(bars, &elem(&1, 1))
     current = List.last(closes)
 
@@ -93,9 +93,9 @@ defmodule GoldBackend.Services.Indicators do
     {indicators, length(bars)}
   end
 
-  defp hourly_bars(prices) do
+  defp time_bars(prices, seconds) do
     prices
-    |> Enum.group_by(&hour_bucket(&1.timestamp))
+    |> Enum.group_by(&GoldBackend.Services.CandleClock.closed_at(&1.timestamp, seconds))
     |> Enum.sort_by(fn {hour, _rows} -> hour end, DateTime)
     |> Enum.map(fn {hour, rows} ->
       latest = Enum.max_by(rows, & &1.timestamp, DateTime)
@@ -103,11 +103,12 @@ defmodule GoldBackend.Services.Indicators do
     end)
   end
 
-  defp hour_bucket(%DateTime{} = dt) do
-    dt
-    |> DateTime.truncate(:second)
-    |> Map.replace!(:minute, 0)
-    |> Map.replace!(:second, 0)
+  def rsi_values(closes) do
+    closes
+    |> Enum.with_index()
+    |> Enum.map(fn {_value, index} ->
+      if index < 14, do: nil, else: rsi(Enum.take(closes, index + 1), 14)
+    end)
   end
 
   defp sma(list, period) do

@@ -14,10 +14,14 @@ defmodule GoldBackend.Services.TradePlan do
 
   def build(indicators, entry, opts \\ []) when is_number(entry) do
     entry = round2(entry)
+    h1_indicators = indicators
+    m15 = Keyword.get(opts, :m15_setup)
     indicators = %{indicators | current_price: entry}
     requested = Keyword.get(opts, :ai_action)
     lean = if requested in [:buy, :sell], do: requested, else: lean(indicators)
-    stop_usd = stop_distance(indicators)
+    entry_indicators = if is_map(m15) and is_map(m15.indicators), do: %{m15.indicators | current_price: entry}, else: indicators
+    m15_levels? = is_map(m15) and not m15.blocked and m15.action == Atom.to_string(lean)
+    stop_usd = if m15_levels?, do: round2(abs(m15.stop_loss - entry)), else: stop_distance(entry_indicators)
     take_usd = round2(stop_usd * 2)
     rr_after_spread = reward_after_spread(stop_usd, take_usd)
 
@@ -25,7 +29,8 @@ defmodule GoldBackend.Services.TradePlan do
       if requested in [:buy, :sell, :wait], do: requested, else: action(indicators, lean)
 
     news_bias = Keyword.get(opts, :news_bias)
-    entry_guard = EntryRules.assess(indicators, lean, Keyword.get(opts, :price_action, %{}))
+    entry_guard = EntryRules.assess(entry_indicators, lean, Keyword.get(opts, :price_action, %{}))
+    opts = Keyword.put(opts, :h1_indicators, h1_indicators)
     block = block_reason(opts, rr_after_spread, signal_action, indicators, news_bias, entry_guard)
     action = if block, do: :wait, else: signal_action
     {stop_loss, take_profit} = levels(lean, entry, stop_usd, take_usd)
@@ -34,7 +39,9 @@ defmodule GoldBackend.Services.TradePlan do
     %{
       instrument: "XAUUSD",
       market: "CFD",
-      timeframe: "H1",
+      timeframe: if(is_map(m15), do: "M15", else: "H1"),
+      trend_timeframe: "H1",
+      m15_setup: m15,
       action: Atom.to_string(action),
       action_label: action_label(action),
       lean: Atom.to_string(lean),
@@ -103,7 +110,7 @@ defmodule GoldBackend.Services.TradePlan do
     #{watchlist_text}
 
     **4. Quản trị rủi ro**
-    Không nhồi lệnh hoặc nới SL. #{if watch?, do: "Chờ nến H1 xác nhận thay vì bán đuổi/bắt đáy.", else: "SL #{usd(plan.stop_loss)}, TP #{usd(plan.take_profit)}; R:R sau spread #{plan.reward_risk_after_spread}."}
+    Không nhồi lệnh hoặc nới SL. #{if watch?, do: "Chờ nến M15 đã đóng xác nhận thay vì bán đuổi/bắt đáy.", else: "SL #{usd(plan.stop_loss)}, TP #{usd(plan.take_profit)}; R:R sau spread #{plan.reward_risk_after_spread}."}
     """
     |> String.replace(~r/\n{3,}/, "\n\n")
     |> String.trim()
@@ -164,6 +171,8 @@ defmodule GoldBackend.Services.TradePlan do
     event = Keyword.get(opts, :blocking_event)
     warmup_detail = Keyword.get(opts, :warmup_detail)
     price_action = Keyword.get(opts, :price_action, %{})
+    m15 = Keyword.get(opts, :m15_setup)
+    h1 = Keyword.get(opts, :h1_indicators, indicators)
 
     cond do
       Keyword.get(opts, :warmup, false) ->
@@ -175,6 +184,18 @@ defmodule GoldBackend.Services.TradePlan do
 
       news_trade_block?(news_bias) ->
         "Tin USD tác động mạnh mới xuất hiện. Khóa lệnh 90 phút để tránh spread giãn và cú quét hai đầu sau tin."
+
+      is_map(m15) and m15.blocked ->
+        m15.reason
+
+      is_map(m15) and signal_action in [:buy, :sell] and
+          (m15.action != Atom.to_string(signal_action) or EntryRules.trend(h1) != signal_action) ->
+        "Điểm vào M15 không cùng hướng xu hướng H1 đã đóng."
+
+      is_map(m15) and not m15.blocked and
+          ((signal_action == :sell and m15.stop_loss <= entry_price(indicators)) or
+             (signal_action == :buy and m15.stop_loss >= entry_price(indicators))) ->
+        "Giá đã vượt SL của mẫu nến M15; không dùng lại điểm vào."
 
       v_reversal_against?(signal_action, indicators, price_action) ->
         reversal_block_reason(signal_action, price_action)
@@ -229,6 +250,8 @@ defmodule GoldBackend.Services.TradePlan do
   defp reversal_block_reason(:buy, price_action) do
     "Không mua đuổi: giá vừa giảm #{usd(Map.get(price_action, :pullback_from_high, 0.0))} USD từ đỉnh #{usd(Map.get(price_action, :high, 0.0))} trong 90 phút sau khi quét biên trên Bollinger."
   end
+
+  defp entry_price(indicators), do: indicators.current_price
 
   defp stop_distance(indicators) do
     atr = max(indicators.atr_14, 0.5)
@@ -371,7 +394,7 @@ defmodule GoldBackend.Services.TradePlan do
               title: "Sell Limit · Chờ hồi về kháng cự",
               priority: "Theo xu hướng H1",
               condition:
-                "Chờ RSI 45–55, Stochastic ≥ 30 và giá hồi vùng SMA20. Chỉ cân nhắc sau nến H1 từ chối giá; kiểm tra lại toàn bộ điều kiện vào lệnh. Chưa đặt lệnh.",
+                "Chờ RSI 45–55, Stochastic ≥ 30 và giá hồi vùng SMA20. Chỉ cân nhắc sau nến M15 đã đóng từ chối giá; kiểm tra lại toàn bộ điều kiện vào lệnh. Chưa đặt lệnh.",
               entry_low: low,
               entry_high: high,
               stop_loss: stop,
@@ -398,7 +421,7 @@ defmodule GoldBackend.Services.TradePlan do
               title: "Buy Limit · Chờ điều chỉnh về hỗ trợ",
               priority: "Theo xu hướng H1",
               condition:
-                "Chờ RSI 45–50, Stochastic ≤ 75 và giá điều chỉnh về SMA20. Chỉ cân nhắc sau nến H1 giữ hỗ trợ; kiểm tra lại toàn bộ điều kiện vào lệnh. Chưa đặt lệnh.",
+                "Chờ RSI 45–50, Stochastic ≤ 75 và giá điều chỉnh về SMA20. Chỉ cân nhắc sau nến M15 đã đóng giữ hỗ trợ; kiểm tra lại toàn bộ điều kiện vào lệnh. Chưa đặt lệnh.",
               entry_low: low,
               entry_high: high,
               stop_loss: stop,

@@ -7,6 +7,8 @@ defmodule GoldBackendWeb.TradingController do
 
   alias GoldBackend.Services.{
     AiDecision,
+    CandleClock,
+    M15Signal,
     EconomicCalendar,
     Indicators,
     NewsBias,
@@ -82,7 +84,7 @@ defmodule GoldBackendWeb.TradingController do
       nil ->
         conn
         |> put_status(503)
-        |> json(%{status: "pending", message: "Đang chuẩn bị nhận định đầu tiên."})
+        |> json(%{status: "pending", message: "Đang chờ phiên phân tích M15 đầu tiên tại mốc :00, :15, :30 hoặc :45."})
 
       data ->
         json(conn, %{status: "success", data: data})
@@ -107,7 +109,8 @@ defmodule GoldBackendWeb.TradingController do
         warmup_detail: context.warmup_detail,
         blocking_event: EconomicCalendar.blocking(context.events),
         news_bias: context.news_bias,
-        price_action: context.price_action
+        price_action: context.price_action,
+        m15_setup: Map.get(context, :m15_setup)
       )
 
     context = %{context | plan: plan}
@@ -117,15 +120,19 @@ defmodule GoldBackendWeb.TradingController do
       ai_insight: insight,
       ai_error: error,
       ai_cached_at: DateTime.utc_now() |> DateTime.truncate(:second) |> DateTime.to_iso8601(),
-      ai_ttl_seconds: InsightCache.interval_seconds()
+      ai_ttl_seconds: InsightCache.interval_seconds(),
+      analysis_candle_closed_at: DateTime.to_iso8601(Map.get(context, :analysis_at, CandleClock.closed_at(DateTime.utc_now()))),
+      ai_next_analysis_at: DateTime.to_iso8601(CandleClock.next_close(Map.get(context, :analysis_at, DateTime.utc_now())))
     })
   end
 
   defp market_context(opts) do
-    now = DateTime.utc_now() |> DateTime.truncate(:second)
-    prices = prices_since(DateTime.add(now, -5, :day))
+    now = Keyword.get(opts, :as_of, DateTime.utc_now()) |> CandleClock.closed_at()
+    prices = prices_since(DateTime.add(now, -5, :day)) |> Enum.filter(&(DateTime.compare(&1.timestamp, now) == :lt))
+    h1_end = CandleClock.closed_at(now, 3600)
+    closed_h1 = Enum.filter(prices, &(DateTime.compare(&1.timestamp, h1_end) == :lt))
 
-    if prices == [] do
+    if prices == [] or closed_h1 == [] do
       {:error, "Chưa có dữ liệu giá vàng trong 5 ngày."}
     else
       news =
@@ -133,10 +140,13 @@ defmodule GoldBackendWeb.TradingController do
         |> NewsTranslator.ensure_vietnamese(timeout: Keyword.get(opts, :translate_timeout, 8_000))
 
       latest = Enum.max_by(prices, & &1.timestamp, DateTime)
-      summary = Indicators.summarize(prices)
+      live_h1 = Enum.filter(closed_h1, &(&1.origin in @live_origins))
+      summary = Indicators.summarize(if(live_h1 == [], do: closed_h1, else: live_h1))
+      h1_ready = live_h1 != [] and summary.hourly_samples >= 50
       entry = latest.price |> Decimal.round(2) |> Decimal.to_float()
       live_ticks = Enum.count(prices, &(&1.origin in @live_origins))
-      {warmup, warmup_detail} = warmup_state(latest, live_ticks)
+      {warmup, warmup_detail} = if h1_ready, do: warmup_state(latest, live_ticks), else: {true, "Chờ đủ 50 nến H1 đã đóng từ giá thị trường để xác định xu hướng."}
+      m15_setup = M15Signal.assess(Keyword.get(opts, :m15_candles, []), summary.indicators, now)
       events = EconomicCalendar.upcoming_usd(now)
       blocking = EconomicCalendar.blocking(events, now)
       news_bias = NewsBias.assess(news, now)
@@ -148,12 +158,15 @@ defmodule GoldBackendWeb.TradingController do
           warmup_detail: warmup_detail,
           blocking_event: blocking,
           news_bias: news_bias,
-          price_action: price_action
+          price_action: price_action,
+          m15_setup: m15_setup
         )
 
       {:ok,
        %{
          latest: latest,
+         analysis_at: now,
+         m15_setup: m15_setup,
          prices: prices,
          news: news,
          news_bias: news_bias,
@@ -228,11 +241,12 @@ defmodule GoldBackendWeb.TradingController do
       live_price_ticks: context.live_price_ticks,
       hourly_samples: context.summary.hourly_samples,
       indicator_basis:
-        "Giá đóng cửa theo giờ, khung H1 · cửa sổ 5 ngày (~120 mẫu) cho SMA20/EMA50",
+        "Giá đóng cửa H1 từ các mẫu báo giá; chỉ dùng giờ đã kết thúc · H1 định hướng, M15 xác nhận điểm vào",
       warmup: context.warmup,
       warmup_detail: context.warmup_detail,
       recent_prices: recent_prices(context.prices),
       indicators_10: context.indicators,
+      m15_setup: Map.get(context, :m15_setup),
       alerts: context.summary.alerts,
       cfd_plan: context.plan,
       news_3d_count: length(context.news),
