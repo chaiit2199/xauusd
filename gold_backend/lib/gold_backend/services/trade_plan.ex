@@ -75,7 +75,7 @@ defmodule GoldBackend.Services.TradePlan do
       news_tone: news_tone(news_bias),
       news_digest: news_digest(news_bias),
       summary: summary(action, lean, risk_label(score), block, indicators),
-      notes: notes(indicators, lean, stop_usd, news_bias),
+      notes: notes(indicators, lean, stop_usd, news_bias, m15_levels?),
       watchlist:
         if(Keyword.get(opts, :warmup, false),
           do: [],
@@ -355,12 +355,17 @@ defmodule GoldBackend.Services.TradePlan do
     price > indicators.bollinger_bands.upper or price < indicators.bollinger_bands.lower
   end
 
-  defp notes(indicators, lean, stop_usd, news_bias) do
+  defp notes(indicators, lean, stop_usd, news_bias, m15_levels?) do
     pivot = indicators.pivot_level
     place = if(lean == :sell, do: "trên", else: "dưới")
 
+    stop_basis =
+      if m15_levels?,
+        do: "SL đặt ngoài râu nến M15 xác nhận 1,50 USD.",
+        else: "Khoảng SL tham chiếu bằng hai lần ATR từ mẫu giá."
+
     base = [
-      "Cắt lỗ nằm #{place} giá #{usd(stop_usd)} USD. Khoảng này bằng hai lần mức giá đi trung bình trong một giờ, để không bị chạm lỗ vì nhiễu ngắn.",
+      "Cắt lỗ nằm #{place} giá #{usd(stop_usd)} USD. #{stop_basis}",
       "Chốt lời nằm xa gấp đôi khoảng cắt lỗ. Phí chênh lệch khi vào lệnh tạm tính #{usd(@spread)} USD, chưa lấy số thật từ sàn.",
       "Mốc trong ngày: dưới #{usd(pivot.s1)} USD, giữa #{usd(pivot.p)} USD, trên #{usd(pivot.r1)} USD.",
       "Kế hoạch này cho trong ngày. Giữ qua đêm sẽ bị tính thêm phí, chưa cộng vào lời lỗ ở trên."

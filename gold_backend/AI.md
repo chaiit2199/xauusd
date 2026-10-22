@@ -43,6 +43,8 @@ snapshot mang action Buy/Sell và chưa có `ai_error`. Không thay model hay te
 kỹ thuật. Khi vi phạm, `cfd_plan.action` là `wait`; `entry_guard.reasons` giải
 thích các điều kiện chưa đạt trên giao diện. AI không có quyền bỏ qua lớp này.
 Các khóa do dữ liệu khởi tạo, lịch tin, tin mạnh và đảo chiều chữ V vẫn giữ nguyên.
+Xu hướng dùng H1 đã kết thúc; khi có OHLC M15 hợp lệ, các bộ lọc RSI,
+Stochastic, Bollinger và khoảng cách SMA20 cho điểm vào dùng chỉ báo M15.
 
 | Điều kiện | SELL | BUY |
 | --- | --- | --- |
@@ -65,17 +67,65 @@ mẫu giá; hệ thống chưa có OHLC để tự xác nhận mẫu nến H1.
 Khi chờ, chỉ hiện kịch bản cùng xu hướng: Sell Limit phía trên giá hiện tại hoặc
 Buy Limit phía dưới, quanh SMA20 trong 0,5 ATR. SL/TP tham chiếu tính lại từ vùng
 chờ; không tạo kịch bản bắt đáy ngược xu hướng. Các kịch bản chưa phải lệnh đã đặt
-và vẫn yêu cầu kiểm tra lại điều kiện, xác nhận nến H1 trước khi sử dụng. Dữ liệu
+và vẫn yêu cầu kiểm tra lại điều kiện, xác nhận nến M15 trước khi sử dụng. Dữ liệu
 khởi tạo không xuất vùng đặt lệnh chờ.
 
 Quy ước 0,25 / 0,5 / 2 ATR cụ thể hóa các khái niệm “sát vùng”, “hồi về” và “quá
-xa”; đây là tham số chiến lược, chưa phải kết quả tối ưu hoặc backtest. ATR hiện
-là trung bình biến động giá đóng cửa H1, không phải True Range từ OHLC; dùng sàn
-0,5 USD giống phép tính SL hiện có. Mọi vùng giá tính từ dữ liệu hiện tại.
+xa”; đây là tham số chiến lược, chưa phải kết quả tối ưu hoặc backtest. ATR H1
+là trung bình biến động giá đóng cửa từ mẫu báo giá. ATR M15 là trung bình 14
+True Range từ OHLC; bộ lọc điểm vào dùng sàn 0,5 USD. Mọi vùng giá tính từ dữ liệu hiện tại.
 
 Quá mua/quá bán không bảo đảm đảo chiều; mục tiêu của bộ lọc là tránh vào đuổi,
 không chứng minh một lệnh chắc chắn có lợi nhuận. Tham khảo
 [Fidelity về RSI trong xu hướng mạnh](https://www.fidelity.com/learning-center/trading-investing/technical-analysis/technical-indicator-guide/RSI).
+
+## Chu kỳ M15 và nguồn OHLC đang chờ kết nối
+
+`InsightCache` kích hoạt tại :00, :15, :30, :45 theo đồng hồ UTC, không tính
+15 phút từ lúc khởi động hoặc lúc AI trả lời. Khi khởi động, chờ mốc kế tiếp.
+Không chạy chồng tác vụ và không chạy lại cùng mốc trong một tiến trình.
+Kết quả hoàn tất sang chu kỳ sau bị loại; snapshot cũ chuyển sang `wait` khi
+hết hạn, Telegram cũng kiểm tra hạn trước khi gửi. Giao diện đếm ngược theo
+`ai_next_analysis_at`, không theo thời điểm nhận phản hồi. Đây là lịch kích hoạt,
+không bảo đảm AI hoàn tất ngay giây đóng nến.
+
+H1 chỉ lấy các giờ đã kết thúc, cần ít nhất 50 mẫu giờ từ nguồn giá thật.
+H1 hiện vẫn là giá đóng cửa gần đúng từ báo giá định kỳ, chưa phải OHLC broker.
+M15 chỉ nhận OHLC từ nguồn sẽ được cung cấp; không nội suy râu nến từ báo giá
+3 phút. Hiện chưa có adapter nguồn chạy tự động, nên bộ kiểm tra M15 trả `wait`.
+
+Điểm nối cho adapter là `TradingController.build_context(m15_candles: candles,
+as_of: candle_close)`. Mỗi phần tử cần đúng cấu trúc:
+
+```elixir
+%{
+  open_time: ~U[2026-10-21 14:45:00Z],
+  open: 4100.2, high: 4104.0, low: 4099.0, close: 4100.0,
+  confirmed: true
+}
+```
+
+Giá phải là số dương theo USD/oz, `open_time` là thời điểm **mở** nến UTC
+đúng mốc 15 phút. Adapter cần chuẩn hóa timestamp, Decimal/chuỗi số và trạng
+thái đóng nến của nhà cung cấp. Cần 50 nến đã đóng liên tục, không trùng/thiếu,
+và nến cuối phải kết thúc đúng mốc phân tích. Nến đang chạy bị bỏ qua, kể cả
+trong 3–5 phút cuối. Adapter tương lai cần lấy các nến này trước khi gọi
+`build_context`; hiện scheduler chưa gọi dịch vụ OHLC nào.
+
+`M15Signal` kiểm tra chiến lược quét thanh khoản đối xứng BUY/SELL:
+
+- H1 xác nhận hướng bằng giá so với SMA20 và dấu MACD.
+- Bốn nến trước tạo vùng có độ rộng không quá 2 ATR M15.
+- Nến cuối phá đỉnh/đáy vùng rồi đóng lại trong vùng. Pinbar có thân ≤30%,
+  râu quét ≥60% biên độ và giá đóng trong 40% phía đối diện râu.
+- Phân kỳ RSI dùng hai đỉnh/đáy cục bộ được xác nhận bởi hai nến mỗi phía;
+  điểm thứ hai nằm trong tám nến gần nhất. Phân kỳ ngược H1 khóa điểm vào.
+- SL ngoài râu nến 1,50 USD; TP ở 2R trước spread. SL quá 5 ATR, SL sai phía
+  hoặc mức giá không dương bị chặn. Các bộ lọc chống vào đuổi và tin tức vẫn áp dụng.
+
+Đây là nhánh sweep + pinbar; nến Marubozu hoặc breakout đơn lẻ không đủ để
+mở tín hiệu. Các ngưỡng là quy ước triển khai, chưa qua backtest; không cam kết
+đảo chiều, khớp lệnh hay lợi nhuận. Hệ thống không tự đặt lệnh ở broker.
 
 ## Cấu hình trên VPS
 
@@ -115,8 +165,8 @@ Log có `stage=analysis` hoặc `stage=translation`, model, thời gian đã ch�
 thời gian chờ khi request lỗi. Nếu phân tích vẫn vượt 120 giây, cần kiểm tra tải
 CPU/RAM và các request khác vào Ollama. Có thể tăng riêng `OLLAMA_TIMEOUT_MS`,
 ví dụ 180000; nếu dịch vượt 60 giây, tăng riêng `OLLAMA_TRANSLATION_TIMEOUT_MS`,
-ví dụ 90000. Tăng timeout làm kết quả đến muộn hơn; nếu một lượt vượt 5 phút,
-hệ thống bỏ qua lượt kích hoạt kế tiếp trong khi lượt hiện tại còn chạy.
+ví dụ 90000. Tăng timeout làm kết quả đến muộn hơn; nếu một lượt vượt mốc M15
+kế tiếp, hệ thống bỏ qua lượt kích hoạt khi còn bận và loại kết quả đã hết chu kỳ.
 
 Để chạy thử với dữ liệu hiện có mà không cập nhật snapshot dashboard hay gửi
 Telegram (tránh chạy nhiều lần đồng thời):

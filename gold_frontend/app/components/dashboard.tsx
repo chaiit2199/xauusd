@@ -3,6 +3,7 @@
 import { useEffect, useRef, useState } from "react";
 import Link from "next/link";
 import { analyzeMarket, crawlNews, fetchOverview } from "../../lib/api";
+import { expireAnalysis } from "../../lib/analysis-window";
 import { when } from "../../lib/format";
 import type { CrawlResponse, MarketBoard } from "../../lib/types";
 import { AiReport } from "./ai-report";
@@ -109,7 +110,7 @@ export function Dashboard({ page = "overview", initialSide = "buy" }: { page?: D
         0,
         Math.ceil((scheduledMs - Date.now()) / 1000),
       );
-      setNextIn(remaining);
+      setNextIn(Number.isFinite(remaining) ? remaining : 0);
     }
 
     tick();
@@ -160,7 +161,8 @@ export function Dashboard({ page = "overview", initialSide = "buy" }: { page?: D
     }
   }
 
-  const view = board;
+  const view = board ? expireAnalysis(board, Date.now()) : null;
+  const expired = view !== board;
   const intervalSeconds =
     view?.analysis_interval_seconds ?? view?.ai_ttl_seconds ?? 900;
 
@@ -269,8 +271,8 @@ export function Dashboard({ page = "overview", initialSide = "buy" }: { page?: D
           ) : null}
 
           {view.m15_setup ? <section className="panel">
-            <div className="panel-head"><h2>Xác nhận M15</h2><p>Nến đóng lúc {when(view.m15_setup.candle_closed_at)}</p></div>
-            <p className="empty">{view.m15_setup.reason}</p>
+            <div className="panel-head"><h2>Xác nhận M15</h2><p>Mốc đóng nến {when(view.m15_setup.candle_closed_at)}</p></div>
+            <p className="empty">{expired ? view.ai_error : view.m15_setup.reason}</p>
             <p className="basis">H1 định hướng · Chỉ đánh giá nến đã đóng · Mốc :00 / :15 / :30 / :45</p>
             {view.m15_setup.divergence !== "none" ? <p className="banner warn">Phân kỳ RSI {view.m15_setup.divergence === "bearish" ? "giảm" : "tăng"} · Cảnh báo, chưa phải lệnh.</p> : null}
           </section> : null}
@@ -290,8 +292,8 @@ export function Dashboard({ page = "overview", initialSide = "buy" }: { page?: D
           </div> : null}
 
           <AiReport
-            insight={analyzing ? null : insight}
-            error={analyzing ? null : insightError}
+            insight={analyzing || expired ? null : insight}
+            error={analyzing ? null : expired ? view.ai_error ?? null : insightError}
             pending={analyzing}
             elapsed={elapsed}
             cachedAt={analyzing ? null : cachedAt}

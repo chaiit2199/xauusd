@@ -21,9 +21,8 @@ defmodule GoldBackendWeb.TradingController do
 
   alias GoldBackend.Trading.{GoldPrice, NewsArticle}
 
-  # Live quotes unlock the ticket. Seed fills ~5 days of hourly bars so SMA20 /
-  # EMA50 / ATR can compute immediately; those rows alone must not lock trading
-  # forever. Synthetic prints (API down) still count as warmup.
+  # Seed supports display only. Trading requires 50 closed live H1 samples
+  # and a confirmed provider M15 setup. Synthetic quotes remain warmup data.
   @live_origins ~w(metals_dev gold_api)
   @min_live_ticks 3
 

@@ -2,8 +2,8 @@ defmodule GoldBackend.Services.Indicators do
   @moduledoc """
   Ten technical readings from stored XAU/USD prices.
 
-  The database stores one tick per minute. Indicators are calculated on
-  hourly closes so SMA 20 and EMA 50 describe hours, not a handful of minutes.
+  The database stores sampled quotes. The default aggregation is hourly;
+  M15Signal passes confirmed M15 closes with a 900-second aggregation.
   ATR uses the average absolute hourly close-to-close move because the table
   does not store high/low.
   """

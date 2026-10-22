@@ -30,6 +30,21 @@ defmodule GoldBackend.Services.IndicatorsTest do
     assert result.macd > 0
   end
 
+  test "M15 aggregation keeps four separate bars per hour" do
+    prices =
+      Enum.map(0..49, fn index ->
+        %{
+          price: Decimal.new(100 + index),
+          timestamp: DateTime.add(~U[2026-10-01 00:00:00Z], index * 900)
+        }
+      end)
+
+    result = Indicators.summarize(prices, 900)
+    assert result.hourly_samples == 50
+    assert result.indicators.sma_20 == 139.5
+    assert Indicators.summarize(prices).hourly_samples == 13
+  end
+
   defp series(values) do
     base = ~U[2026-10-01 00:00:00Z]
 

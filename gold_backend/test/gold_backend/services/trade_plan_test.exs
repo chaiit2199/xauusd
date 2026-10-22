@@ -150,6 +150,69 @@ defmodule GoldBackend.Services.TradePlanTest do
     assert short.condition =~ "RSI 45–55"
   end
 
+  test "AI cannot bypass a missing closed M15 setup" do
+    plan =
+      TradePlan.build(indicators(%{}), 4130.4,
+        ai_action: :sell,
+        m15_setup: %{blocked: true, action: "wait", reason: "Chờ OHLC M15", indicators: nil}
+      )
+
+    assert plan.action == "wait"
+    assert plan.timeframe == "M15"
+    assert plan.block_reason == "Chờ OHLC M15"
+  end
+
+  test "confirmed M15 setup uses wick stop and preserves entry filters" do
+    setup = %{
+      blocked: false,
+      action: "sell",
+      indicators: indicators(%{}),
+      stop_loss: 4135.9,
+      atr: 2.0
+    }
+
+    plan = TradePlan.build(indicators(%{}), 4130.4, ai_action: :sell, m15_setup: setup)
+    assert plan.action == "sell"
+    assert plan.stop_loss == 4135.9
+    assert plan.stop_distance == 5.5
+    assert plan.take_distance == 11.0
+
+    oversold = %{setup | indicators: indicators(%{rsi_14: 30.0})}
+    blocked = TradePlan.build(indicators(%{}), 4130.4, ai_action: :sell, m15_setup: oversold)
+    assert blocked.action == "wait"
+    assert blocked.block_reason =~ "RSI"
+  end
+
+  test "AI action must match both the closed H1 trend and M15 setup" do
+    setup = %{
+      blocked: false,
+      action: "buy",
+      indicators: indicators(%{}),
+      stop_loss: 4125.0,
+      atr: 2.0
+    }
+
+    plan = TradePlan.build(indicators(%{}), 4130.4, ai_action: :buy, m15_setup: setup)
+    assert plan.action == "wait"
+    assert plan.block_reason =~ "H1 đã đóng"
+  end
+
+  test "entry beyond the wick stop or more than five ATR away invalidates setup" do
+    setup = %{
+      blocked: false,
+      action: "sell",
+      indicators: indicators(%{}),
+      stop_loss: 4135.9,
+      atr: 2.0
+    }
+
+    for {entry, reason} <- [{4136.0, "vượt SL"}, {4120.0, "5 ATR"}] do
+      plan = TradePlan.build(indicators(%{}), entry, ai_action: :sell, m15_setup: setup)
+      assert plan.action == "wait"
+      assert plan.block_reason =~ reason
+    end
+  end
+
   defp indicators(overrides) do
     Map.merge(
       %{

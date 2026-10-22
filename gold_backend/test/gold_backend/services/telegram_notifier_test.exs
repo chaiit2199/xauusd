@@ -62,6 +62,17 @@ defmodule GoldBackend.Services.TelegramNotifierTest do
     refute_received {:sent, _, _, _}
   end
 
+  test "expired or malformed M15 expiry cannot send a notification" do
+    for expiry <- ["2026-01-01T00:00:00Z", "invalid", nil] do
+      snapshot = Map.put(@snapshot, :ai_next_analysis_at, expiry)
+
+      assert {:error, _} =
+               TelegramNotifier.notify(snapshot,
+                 http_post: fn _, _, _, _ -> flunk("must not send an expired signal") end
+               )
+    end
+  end
+
   test "wait, blocked trades and AI errors never send or require Telegram configuration" do
     Application.put_env(:gold_backend, :telegram, [])
     wait = %{cfd_plan: %{action: "wait"}, ai_error: nil}
