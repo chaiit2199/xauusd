@@ -10,6 +10,17 @@ defmodule GoldBackend.Services.AiDecisionTest do
     assert {:error, _} = AiDecision.parse(%{"action" => "sell", "reason" => " "})
   end
 
+  test "invalid and empty Ollama responses return JSON-safe errors" do
+    for response <- ["", ~s({"response":""}), ~s({"response":"not json"}), "{}"] do
+      assert {:error, error} = AiDecision.decode_response(response)
+      assert is_binary(error)
+      assert {:ok, _} = Jason.encode(%{ai_error: error})
+    end
+
+    response = Jason.encode!(%{response: Jason.encode!(%{action: "sell", reason: "Giảm"})})
+    assert {:ok, :sell, "Giảm"} = AiDecision.decode_response(response)
+  end
+
   test "wait never sends a notification" do
     assert :ok = TelegramNotifier.notify(%{cfd_plan: %{action: "wait"}})
   end

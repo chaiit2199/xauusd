@@ -41,9 +41,7 @@ defmodule GoldBackend.Services.AiDecision do
            recv_timeout: timeout
          ) do
       {:ok, %HTTPoison.Response{status_code: 200, body: response}} ->
-        with {:ok, %{"response" => text}} <- Jason.decode(response),
-             {:ok, result} <- Jason.decode(text),
-             do: parse(result)
+        decode_response(response)
 
       {:ok, %HTTPoison.Response{status_code: 404}} ->
         {:error,
@@ -62,6 +60,17 @@ defmodule GoldBackend.Services.AiDecision do
     end
   rescue
     _ -> {:error, "Không đọc được kết quả AI."}
+  end
+
+  def decode_response(body) do
+    with {:ok, %{"response" => text}} when is_binary(text) <- Jason.decode(body),
+         true <- String.trim(text) != "",
+         {:ok, result} <- Jason.decode(text) do
+      parse(result)
+    else
+      false -> {:error, "Ollama trả nội dung rỗng; model có thể chưa hoàn thành kết luận."}
+      _ -> {:error, "Ollama trả dữ liệu JSON không hợp lệ."}
+    end
   end
 
   def parse(%{"action" => action, "reason" => reason})
