@@ -73,30 +73,40 @@ defmodule GoldBackendWeb.TradingController do
     end
   end
 
-  def overview(conn, _params) do
-    case market_context(translate_timeout: 4_000) do
-      {:error, message} ->
-        conn |> put_status(400) |> json(%{status: "error", message: message})
+  def overview(conn, _params), do: cached_response(conn)
+  def analyze_and_get_data(conn, _params), do: cached_response(conn)
 
-      {:ok, context} ->
-        json(conn, %{
-          status: "success",
-          data: Map.merge(public_snapshot(context), InsightCache.peek())
-        })
+  defp cached_response(conn) do
+    case InsightCache.snapshot() do
+      nil ->
+        conn
+        |> put_status(503)
+        |> json(%{status: "pending", message: "Đang chuẩn bị nhận định đầu tiên."})
+
+      data ->
+        json(conn, %{status: "success", data: data})
     end
   end
 
-  def analyze_and_get_data(conn, _params) do
-    case market_context(translate_timeout: 8_000) do
-      {:error, message} ->
-        conn |> put_status(400) |> json(%{status: "error", message: message})
+  def analysis_snapshot(context, action, insight, error) do
+    plan =
+      TradePlan.build(context.indicators, context.plan.entry,
+        ai_action: action,
+        warmup: context.warmup,
+        warmup_detail: context.warmup_detail,
+        blocking_event: EconomicCalendar.blocking(context.events),
+        news_bias: context.news_bias,
+        price_action: context.price_action
+      )
 
-      {:ok, context} ->
-        json(conn, %{
-          status: "success",
-          data: Map.merge(public_snapshot(context), InsightCache.resolve(context))
-        })
-    end
+    context = %{context | plan: plan}
+
+    Map.merge(public_snapshot(context), %{
+      ai_insight: insight,
+      ai_error: error,
+      ai_cached_at: DateTime.utc_now() |> DateTime.truncate(:second) |> DateTime.to_iso8601(),
+      ai_ttl_seconds: InsightCache.interval_seconds()
+    })
   end
 
   defp market_context(opts) do
@@ -142,7 +152,8 @@ defmodule GoldBackendWeb.TradingController do
          live_price_ticks: live_ticks,
          events: events,
          plan: plan,
-         price_ticks: length(prices)
+         price_ticks: length(prices),
+         price_action: price_action
        }}
     end
   end

@@ -12,11 +12,15 @@ defmodule GoldBackend.Services.TradePlan do
 
   def build(indicators, entry, opts \\ []) when is_number(entry) do
     entry = round2(entry)
-    lean = lean(indicators)
+    requested = Keyword.get(opts, :ai_action)
+    lean = if requested in [:buy, :sell], do: requested, else: lean(indicators)
     stop_usd = stop_distance(indicators)
     take_usd = round2(stop_usd * 2)
     rr_after_spread = reward_after_spread(stop_usd, take_usd)
-    signal_action = action(indicators, lean)
+
+    signal_action =
+      if requested in [:buy, :sell, :wait], do: requested, else: action(indicators, lean)
+
     news_bias = Keyword.get(opts, :news_bias)
     block = block_reason(opts, rr_after_spread, signal_action, indicators, news_bias)
     action = if block, do: :wait, else: signal_action
@@ -168,6 +172,14 @@ defmodule GoldBackend.Services.TradePlan do
 
       rr_after_spread < 1.5 ->
         "Phần lời sau phí vào lệnh chưa đủ lớn so với phần lỗ."
+
+      signal_action == :buy and
+          (indicators.current_price <= indicators.sma_20 or indicators.macd <= 0) ->
+        "Điều kiện mua không phù hợp với SMA20 hoặc MACD."
+
+      signal_action == :sell and
+          (indicators.current_price >= indicators.sma_20 or indicators.macd >= 0) ->
+        "Điều kiện bán không phù hợp với SMA20 hoặc MACD."
 
       signal_action == :wait ->
         "Tín hiệu chưa cùng một hướng."

@@ -51,3 +51,7 @@ end
 if System.get_env("PHX_SERVER") in ["true", "1"] do
   config :gold_backend, GoldBackendWeb.Endpoint, server: true
 end
+
+config :gold_backend, :telegram,
+  bot_token: System.get_env("TELEGRAM_BOT_TOKEN"),
+  chat_id: System.get_env("TELEGRAM_CHAT_ID")

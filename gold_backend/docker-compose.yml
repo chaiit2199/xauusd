@@ -15,6 +15,8 @@ services:
       OLLAMA_URL: ${OLLAMA_URL:-http://host.docker.internal:11434/api/generate}
       OLLAMA_MODEL: ${OLLAMA_MODEL:-deepseek-r1:1.5b}
       OLLAMA_TIMEOUT_MS: ${OLLAMA_TIMEOUT_MS:-120000}
+      TELEGRAM_BOT_TOKEN: ${TELEGRAM_BOT_TOKEN:-}
+      TELEGRAM_CHAT_ID: ${TELEGRAM_CHAT_ID:-}
       METALS_DEV_API_KEY: ${METALS_DEV_API_KEY:-}
       CORS_ORIGINS: ${CORS_ORIGINS:-https://crypto.9nine.tech,https://xau.9nine.tech}
     ports:

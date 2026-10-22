@@ -10,7 +10,6 @@ import { NewsList } from "./news-list";
 import { Sparkline } from "./sparkline";
 import { TradeTicket } from "./trade-ticket";
 
-const ANALYZE_MS = 5 * 60 * 1000;
 const BOARD_MS = 60_000;
 
 export function Dashboard() {
@@ -41,6 +40,7 @@ export function Dashboard() {
       try {
         const data = await fetchOverview();
         if (cancelled) return;
+        setBoardError(null);
         setBoard(data);
         if (!analyzingRef.current) {
           setInsight(data.ai_insight ?? null);
@@ -63,46 +63,6 @@ export function Dashboard() {
 
     return () => {
       cancelled = true;
-      window.clearInterval(id);
-    };
-  }, []);
-
-  useEffect(() => {
-    let cancelled = false;
-
-    async function runAnalyze(force: boolean) {
-      if (analyzeLock.current) return;
-      analyzeLock.current = true;
-      analyzingRef.current = true;
-      setAnalyzing(true);
-      setAnalyzeError(null);
-
-      try {
-        const result = await analyzeMarket();
-        if (cancelled && !force) return;
-        setBoard(result);
-        setInsight(result.ai_insight);
-        setInsightError(result.ai_error);
-        setCachedAt(result.ai_cached_at);
-      } catch (error) {
-        if (!cancelled) {
-          setAnalyzeError(
-            error instanceof Error ? error.message : "Không lấy được nhận định.",
-          );
-        }
-      } finally {
-        analyzingRef.current = false;
-        setAnalyzing(false);
-        analyzeLock.current = false;
-      }
-    }
-
-    const boot = window.setTimeout(() => void runAnalyze(false), 2_000);
-    const id = window.setInterval(() => void runAnalyze(false), ANALYZE_MS);
-
-    return () => {
-      cancelled = true;
-      window.clearTimeout(boot);
       window.clearInterval(id);
     };
   }, []);
@@ -228,8 +188,8 @@ export function Dashboard() {
             {analyzing
               ? `Đang nhận định ${elapsed}s`
               : nextIn != null && nextIn > 0
-                ? `Nhận định ngay · còn ${Math.ceil(nextIn / 60)}p`
-                : "Nhận định ngay"}
+                ? `Tải lại nhận định · còn ${Math.ceil(nextIn / 60)}p`
+                : "Tải lại nhận định"}
           </button>
         </div>
       </header>

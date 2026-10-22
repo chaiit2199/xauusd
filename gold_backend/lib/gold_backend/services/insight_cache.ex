@@ -1,227 +1,123 @@
 defmodule GoldBackend.Services.InsightCache do
-  @moduledoc """
-  Keeps one H1 commentary for five minutes.
-
-  A timer refreshes news lightly, rebuilds the ticket from the latest rows,
-  then asks the local model to explain price + indicators + headlines.
-  A request inside the window returns the stored note when the ticket still
-  has the same side. The page load never starts a new note.
-  """
-
   use GenServer
-
-  alias GoldBackend.Services.NewsCrawler
-  alias GoldBackendWeb.TradingController
-
   require Logger
-
-  @ttl_seconds 5 * 60
-  @interval_ms 5 * 60 * 1000
-  @boot_delay_ms 8_000
-  @job_timeout_ms 165_000
-  @call_timeout 170_000
+  alias GoldBackend.Services.{AiDecision, NewsCrawler, TelegramNotifier}
+  alias GoldBackendWeb.TradingController
+  @interval_ms 300_000
   @table __MODULE__
+  def start_link(_), do: GenServer.start_link(__MODULE__, %{}, name: __MODULE__)
+  def interval_seconds, do: 300
 
-  def start_link(_opts) do
-    GenServer.start_link(__MODULE__, %{}, name: __MODULE__)
-  end
+  def fresh?(%DateTime{} = at, action, current, now \\ DateTime.utc_now()),
+    do: action == current and DateTime.diff(now, at, :second) < 300
 
-  def interval_seconds, do: @ttl_seconds
-
-  def peek do
+  def snapshot do
     case :ets.whereis(@table) do
       :undefined ->
-        blank()
+        nil
 
-      _table ->
-        case :ets.lookup(@table, :cache) do
-          [{:cache, state}] -> view(state)
-          _ -> blank()
+      _ ->
+        case :ets.lookup(@table, :snapshot) do
+          [{:snapshot, data}] -> data
+          _ -> nil
         end
     end
   rescue
-    ArgumentError -> blank()
+    ArgumentError -> nil
   end
 
-  def resolve(context) do
-    case Process.whereis(__MODULE__) do
-      nil ->
-        blank()
-
-      pid ->
-        try do
-          GenServer.call(pid, {:resolve, context}, @call_timeout)
-        catch
-          :exit, reason ->
-            Logger.warning("Insight resolve unavailable: #{inspect(reason)}")
-            peek()
-        end
+  def peek do
+    case snapshot() do
+      nil -> %{ai_insight: nil, ai_error: nil, ai_cached_at: nil, ai_ttl_seconds: 300}
+      data -> Map.take(data, [:ai_insight, :ai_error, :ai_cached_at, :ai_ttl_seconds])
     end
   end
 
-  def fresh?(cached_at, action, current_action, now \\ DateTime.utc_now())
-
-  def fresh?(%DateTime{} = cached_at, action, current_action, now) do
-    action == current_action and DateTime.diff(now, cached_at, :second) < @ttl_seconds
-  end
-
-  def fresh?(_cached_at, _action, _current_action, _now), do: false
-
+  def resolve(_), do: peek()
   @impl true
-  def init(_state) do
+  def init(_) do
     :ets.new(@table, [:named_table, :protected, :set, read_concurrency: true])
-    state = empty_state()
-    publish(state)
-    Process.send_after(self(), :refresh, @boot_delay_ms)
-    {:ok, state}
+    Process.send_after(self(), :refresh, 8_000)
+    {:ok, %{job: nil}}
   end
 
   @impl true
   def handle_info(:refresh, state) do
-    schedule()
+    Process.send_after(self(), :refresh, @interval_ms)
 
-    if state.job_ref do
-      Logger.info("Insight refresh skipped: previous background job is still running")
+    if state.job do
       {:noreply, state}
     else
-      {:noreply, start_job(state, &refresh_from_database/0)}
+      task = Task.Supervisor.async_nolink(GoldBackend.TaskSupervisor, &compute/0)
+      Process.send_after(self(), {:timeout, task.ref}, 165_000)
+      {:noreply, %{state | job: task}}
     end
   end
 
-  def handle_info({ref, {:ok, cache}}, %{job_ref: ref} = state) do
+  def handle_info({ref, {:ok, snapshot}}, %{job: %{ref: ref}} = state) do
     Process.demonitor(ref, [:flush])
-    {:noreply, finish_job(state, cache)}
+    :ets.insert(@table, {:snapshot, snapshot})
+
+    Task.Supervisor.start_child(GoldBackend.TaskSupervisor, fn ->
+      TelegramNotifier.notify(snapshot)
+    end)
+
+    {:noreply, %{state | job: nil}}
   end
 
-  def handle_info({ref, {:error, reason}}, %{job_ref: ref} = state) do
+  def handle_info({ref, {:error, reason}}, %{job: %{ref: ref}} = state) do
     Process.demonitor(ref, [:flush])
-    Logger.warning("Insight background job skipped: #{inspect(reason)}")
-    {:noreply, finish_job(state, nil)}
+    Logger.warning("Analysis failed: #{inspect(reason)}")
+    {:noreply, %{state | job: nil}}
   end
 
-  def handle_info({:DOWN, ref, :process, _pid, reason}, %{job_ref: ref} = state) do
-    Logger.warning("Insight background job stopped: #{inspect(reason)}")
-    {:noreply, finish_job(state, nil)}
+  def handle_info({:DOWN, ref, :process, _, reason}, %{job: %{ref: ref}} = state) do
+    Logger.warning("Analysis stopped: #{inspect(reason)}")
+    {:noreply, %{state | job: nil}}
   end
 
-  def handle_info({:job_timeout, ref}, %{job_ref: ref, job_pid: pid} = state) do
+  def handle_info({:timeout, ref}, %{job: %{ref: ref, pid: pid}} = state) do
     Process.exit(pid, :kill)
-    Logger.warning("Insight background job exceeded #{@job_timeout_ms}ms and was stopped")
-    {:noreply, finish_job(state, nil)}
+    Logger.warning("Analysis timed out")
+    {:noreply, %{state | job: nil}}
   end
 
-  def handle_info(_message, state), do: {:noreply, state}
+  def handle_info(_, state), do: {:noreply, state}
 
-  @impl true
-  def handle_call({:resolve, context}, from, state) do
-    cond do
-      usable?(state, context.plan.action) ->
-        {:reply, view(state), state}
-
-      state.job_ref ->
-        {:noreply, %{state | waiters: [from | state.waiters]}}
-
-      true ->
-        job = fn -> {:ok, compute(context)} end
-        {:noreply, start_job(state, job, from)}
+  defp compute do
+    try do
+      NewsCrawler.fetch_and_save_all()
+    rescue
+      error -> Logger.warning("News refresh failed: #{Exception.message(error)}")
     end
-  end
 
-  defp refresh_from_database do
-    refresh_news()
+    with {:ok, context} <- TradingController.build_context(translate_timeout: 8_000) do
+      {action, reason, error} =
+        case AiDecision.analyze(context) do
+          {:ok, action, reason} ->
+            {action, reason, nil}
 
-    case TradingController.build_context(translate_timeout: 8_000) do
-      {:ok, context} ->
-        {:ok, compute(context)}
+          {:error, error} ->
+            {:wait, "Không có quyết định AI hợp lệ; tiếp tục theo dõi.", error}
 
-      {:error, reason} ->
-        {:error, reason}
+          _ ->
+            {:wait, "Không có quyết định AI hợp lệ; tiếp tục theo dõi.",
+             "Kết quả AI không hợp lệ."}
+        end
+
+      snapshot = TradingController.analysis_snapshot(context, action, reason, error)
+
+      snapshot =
+        if snapshot.cfd_plan.action != Atom.to_string(action) do
+          %{
+            snapshot
+            | ai_insight: reason <> "\nĐiều kiện khóa lệnh: " <> snapshot.cfd_plan.block_reason
+          }
+        else
+          snapshot
+        end
+
+      {:ok, snapshot}
     end
-  end
-
-  defp refresh_news do
-    sources = NewsCrawler.fetch_and_save_all()
-    saved = Enum.reduce(sources, 0, fn source, acc -> acc + source.saved end)
-    Logger.info("Insight cycle crawled news, saved #{saved} articles")
-  rescue
-    error ->
-      Logger.warning("Insight news crawl skipped: #{Exception.message(error)}")
-  end
-
-  defp compute(context) do
-    {text, error} = TradingController.write_commentary(context)
-
-    %{
-      insight: text,
-      error: error,
-      generated_at: DateTime.utc_now() |> DateTime.truncate(:second),
-      action: context.plan.action
-    }
-  end
-
-  defp usable?(state, action) do
-    fresh?(state.generated_at, state.action, action)
-  end
-
-  defp start_job(state, fun, waiter \\ nil) do
-    task = Task.Supervisor.async_nolink(GoldBackend.TaskSupervisor, fun)
-    Process.send_after(self(), {:job_timeout, task.ref}, @job_timeout_ms)
-
-    waiters = if waiter, do: [waiter | state.waiters], else: state.waiters
-    %{state | job_ref: task.ref, job_pid: task.pid, waiters: waiters}
-  end
-
-  defp finish_job(state, cache) do
-    next_state =
-      state
-      |> maybe_store(cache)
-      |> Map.merge(%{job_ref: nil, job_pid: nil, waiters: []})
-
-    response = view(next_state)
-    Enum.each(state.waiters, &GenServer.reply(&1, response))
-    publish(next_state)
-    next_state
-  end
-
-  defp maybe_store(state, nil), do: state
-
-  defp maybe_store(state, cache) do
-    Map.merge(state, Map.take(cache, [:insight, :error, :generated_at, :action]))
-  end
-
-  defp publish(state) do
-    :ets.insert(@table, {:cache, Map.take(state, [:insight, :error, :generated_at, :action])})
-  end
-
-  defp view(state) do
-    if fresh?(state.generated_at, state.action, state.action) do
-      %{
-        ai_insight: state.insight,
-        ai_error: state.error,
-        ai_cached_at: DateTime.to_iso8601(state.generated_at),
-        ai_ttl_seconds: @ttl_seconds
-      }
-    else
-      blank()
-    end
-  end
-
-  defp blank,
-    do: %{ai_insight: nil, ai_error: nil, ai_cached_at: nil, ai_ttl_seconds: @ttl_seconds}
-
-  defp empty_state do
-    %{
-      insight: nil,
-      error: nil,
-      generated_at: nil,
-      action: nil,
-      job_ref: nil,
-      job_pid: nil,
-      waiters: []
-    }
-  end
-
-  defp schedule do
-    Process.send_after(self(), :refresh, @interval_ms)
   end
 end
