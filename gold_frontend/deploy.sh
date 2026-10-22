@@ -1,25 +1,16 @@
 #!/usr/bin/env bash
 set -euo pipefail
 # Run on the VPS inside gold_frontend after git pull.
-# Nginx must proxy:
+# Reverse proxy (Caddy/nginx):
 #   https://crypto.9nine.tech/     → 127.0.0.1:3003
-#   https://crypto.9nine.tech/api/ → 127.0.0.1:5005
-#
-# Same-origin /api = no browser CORS. Never bake api-crypto into the client.
+#   https://crypto.9nine.tech/api/ → 127.0.0.1:5005   (fallback khi API_BASE_URL rỗng)
+# API base được đọc từ API_BASE_URL (đặt trong .env.local của VPS hoặc export
+# trước khi chạy deploy.sh); để trống = same-origin /api, không cần CORS.
 
 cd "$(dirname "$0")"
 
-# .env.local overrides .env.production during `next build` — move it aside.
-if [[ -f .env.local ]]; then
-  mv .env.local ".env.local.bak.$(date +%s)"
-  echo "Moved .env.local aside so production build stays same-origin."
-fi
-
+# Giữ nguyên .env.local của VPS: nó chứa API_BASE_URL cho `next build`.
 unset NEXT_PUBLIC_API_URL || true
-unset API_BASE_URL || true
-
-# Explicit empty for this shell (belt and suspenders).
-export NEXT_PUBLIC_API_URL=
 
 npm ci
 npm run build
