@@ -42,6 +42,25 @@ defmodule GoldBackend.Services.AiDecisionTest do
              AiDecision.decode_response(response)
   end
 
+  test "only a complete visible JSON answer is accepted outside thinking or fences" do
+    valid =
+      Jason.encode!(%{
+        action: "wait",
+        reason: String.duplicate("Chờ xác nhận xu hướng, chưa giao dịch khi tin trái chiều. ", 3)
+      })
+
+    for content <- ["```json\n#{valid}\n```", "<think>English internal text</think>\n#{valid}"] do
+      assert {:ok, :wait, _} = AiDecision.decode_response(Jason.encode!(%{response: content}))
+    end
+
+    for content <- ["<think>#{valid}", "<think>#{valid}</think>", "prefix #{valid}"] do
+      assert {:error, _} = AiDecision.decode_response(Jason.encode!(%{response: content}))
+    end
+
+    assert {:error, _} =
+             AiDecision.decode_response(Jason.encode!(%{response: valid, done_reason: "length"}))
+  end
+
   test "wait message includes the reason but no order levels" do
     snapshot = %{
       cfd_plan: %{action: "wait", entry: 2000},

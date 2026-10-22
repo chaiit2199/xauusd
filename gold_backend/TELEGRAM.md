@@ -2,8 +2,9 @@
 
 Dockerfile không sao chép `rel/`, vì vậy cấu hình trong `rel/env.sh.eex` không
 được đưa vào image. Docker Compose nhận thông tin bot từ `env.sh` trên VPS.
-Lỗi ngôn ngữ AI không tắt thông báo: snapshot lỗi vẫn gửi trạng thái
-“Không giao dịch” kèm nguyên nhân.
+Chỉ gửi khi quyết định cuối cùng (`cfd_plan.action`) là `buy` hoặc `sell` và
+không có lỗi AI. `wait` / “Không giao dịch” không gửi, kể cả AI đề xuất Buy/Sell
+nhưng điều kiện kiểm soát rủi ro đã khóa lệnh.
 
 1. Trên VPS, sửa `/home/deploy_user/xauusd/env.sh`, đặt đủ hai biến bằng giá trị
    thật (không đưa token vào Git hoặc log):
@@ -28,7 +29,8 @@ Lỗi ngôn ngữ AI không tắt thông báo: snapshot lỗi vẫn gửi trạn
 
    Kết quả cần là `%{configured: true, missing: []}`. Kết quả này xác nhận đủ
    cấu hình; việc Telegram chấp nhận tin được xác nhận bằng log gửi thành công.
-5. Đợi một vòng phân tích (chu kỳ 5 phút), rồi xem log:
+5. Đợi một vòng phân tích có kết quả Buy/Sell (chu kỳ 5 phút), rồi xem log.
+   Nếu kết quả là “Không giao dịch”, không có tin Telegram là hành vi đúng:
 
    ```bash
    docker logs --since 10m xauusd-api-1 2>&1 | grep -E 'Telegram|Analysis|Ollama|Vietnamese'
@@ -44,7 +46,7 @@ Lỗi ngôn ngữ AI không tắt thông báo: snapshot lỗi vẫn gửi trạn
    - `Analysis failed/stopped/timed out`: chưa tạo được snapshot mới nên chưa
      chạy bước gửi thông báo; xử lý lỗi dữ liệu/phân tích trước.
 
-Bản sửa AI thử chuyển nhận định sang tiếng Việt tối đa một lần, dùng thời gian
-còn lại của `OLLAMA_TIMEOUT_MS`, và từ chối bản dịch nếu action thay đổi. Nếu model
+Bản sửa AI thử chuyển nhận định sang tiếng Việt tối đa một lần bằng cùng model,
+dùng `OLLAMA_TRANSLATION_TIMEOUT_MS` riêng, và từ chối bản dịch nếu action thay đổi. Nếu model
 vẫn không trả tiếng Việt hợp lệ, hệ thống giữ lỗi và tiếp tục chờ; không tự tạo
 quyết định AI thay thế.

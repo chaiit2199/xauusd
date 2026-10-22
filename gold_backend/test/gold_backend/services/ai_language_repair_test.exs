@@ -13,7 +13,7 @@ defmodule GoldBackend.Services.AiLanguageRepairTest do
 
   setup do
     previous = Application.get_env(:gold_backend, :ollama)
-    Application.put_env(:gold_backend, :ollama, timeout_ms: 1_000)
+    Application.put_env(:gold_backend, :ollama, timeout_ms: 1_000, translation_timeout_ms: 2_000)
 
     on_exit(fn ->
       if previous,
@@ -33,7 +33,7 @@ defmodule GoldBackend.Services.AiLanguageRepairTest do
     }
   end
 
-  test "repairs English once with the original action and remaining time budget", %{
+  test "repairs English once using the same model and an independent translation timeout", %{
     context: context
   } do
     post = fn _url, body, _headers, options ->
@@ -47,10 +47,16 @@ defmodule GoldBackend.Services.AiLanguageRepairTest do
     end
 
     assert {:ok, :wait, @vietnamese} = AiDecision.analyze(context, http_post: post)
-    assert_received {:request, _, first_options}
+    assert_received {:request, original, first_options}
     assert_received {:request, repair, repair_options}
     assert repair["prompt"] =~ @english
-    assert repair_options[:recv_timeout] <= first_options[:recv_timeout]
+    assert original["model"] == "deepseek-r1:1.5b"
+    assert repair["model"] == original["model"]
+    refute Map.has_key?(original, "system")
+    refute Map.has_key?(repair, "system")
+    assert original["options"]["num_predict"] == 800
+    assert first_options[:recv_timeout] == 1_000
+    assert repair_options[:recv_timeout] == 2_000
     refute_received {:request, _, _}
   end
 
@@ -114,19 +120,114 @@ defmodule GoldBackend.Services.AiLanguageRepairTest do
     end
   end
 
-  test "no repair request starts after the original time budget expires", %{context: context} do
-    Application.put_env(:gold_backend, :ollama, timeout_ms: 10)
+  test "slow analysis does not consume the translation timeout", %{context: context} do
+    Application.put_env(:gold_backend, :ollama, timeout_ms: 100, translation_timeout_ms: 300)
 
-    post = fn _, _, _, _ ->
+    post = fn _, body, _, options ->
+      case get_in(Jason.decode!(body), ["format", "properties", "action", "enum"]) do
+        ["wait"] ->
+          send(self(), {:translation_timeout, options[:recv_timeout]})
+          response("wait", @vietnamese)
+
+        _ ->
+          Process.sleep(20)
+          response("wait", @english)
+      end
+    end
+
+    assert {:ok, :wait, _} = AiDecision.analyze(context, http_post: post)
+    assert_received {:translation_timeout, 300}
+  end
+
+  test "translation timeout names its own configuration and is not retried", %{context: context} do
+    post = fn _, body, _, _ ->
       send(self(), :called)
-      Process.sleep(20)
-      response("wait", @english)
+
+      case get_in(Jason.decode!(body), ["format", "properties", "action", "enum"]) do
+        ["wait"] -> {:error, %HTTPoison.Error{reason: :timeout}}
+        _ -> response("wait", @english)
+      end
     end
 
     assert {:error, reason} = AiDecision.analyze(context, http_post: post)
-    assert reason =~ "quá thời gian"
+    assert reason =~ "OLLAMA_TRANSLATION_TIMEOUT_MS"
+    assert_received :called
     assert_received :called
     refute_received :called
+  end
+
+  test "connection and receive timeouts in analysis do not trigger a translation", %{
+    context: context
+  } do
+    for reason <- [:timeout, :connect_timeout, :etimedout] do
+      post = fn _, _, _, _ ->
+        send(self(), :called)
+        {:error, %HTTPoison.Error{reason: reason}}
+      end
+
+      assert {:error, error} = AiDecision.analyze(context, http_post: post)
+      assert error =~ "OLLAMA_TIMEOUT_MS"
+      refute error =~ "OLLAMA_TRANSLATION_TIMEOUT_MS"
+      assert_received :called
+      refute_received :called
+    end
+  end
+
+  test "worker budget covers both configured requests and connection overhead" do
+    assert AiDecision.max_duration_ms([]) == 190_000
+
+    assert AiDecision.max_duration_ms(timeout_ms: 180_000, translation_timeout_ms: 90_000) ==
+             280_000
+  end
+
+  test "prompt avoids duplicate headlines and generation budget remains configurable", %{
+    context: context
+  } do
+    Application.put_env(:gold_backend, :ollama, num_predict: 950)
+
+    news =
+      for i <- 1..15,
+          do: %{
+            title: "English headline #{i}",
+            title_vi: "Tiêu đề tiếng Việt #{i}",
+            published_at: nil
+          }
+
+    post = fn _, body, _, options ->
+      send(self(), {:request, Jason.decode!(body), options})
+      response("wait", @vietnamese)
+    end
+
+    assert {:ok, :wait, _} = AiDecision.analyze(%{context | news: news}, http_post: post)
+    assert_received {:request, request, options}
+    assert request["options"]["num_predict"] == 950
+    assert request["prompt"] =~ "Tiêu đề tiếng Việt 6"
+    refute request["prompt"] =~ "Tiêu đề tiếng Việt 7"
+    refute request["prompt"] =~ "English headline"
+    assert options[:timeout] == 5_000
+  end
+
+  test "language repair can read a complete JSON answer after thinking and a code fence", %{
+    context: context
+  } do
+    post = fn _, body, _, _ ->
+      case get_in(Jason.decode!(body), ["format", "properties", "action", "enum"]) do
+        ["wait"] ->
+          response("wait", @vietnamese)
+
+        _ ->
+          json = Jason.encode!(%{action: "wait", reason: @english})
+
+          {:ok,
+           %HTTPoison.Response{
+             status_code: 200,
+             body:
+               Jason.encode!(%{response: "<think>internal text</think>\n```json\n#{json}\n```"})
+           }}
+      end
+    end
+
+    assert {:ok, :wait, @vietnamese} = AiDecision.analyze(context, http_post: post)
   end
 
   test "decomposed Vietnamese accents are normalized before validation" do

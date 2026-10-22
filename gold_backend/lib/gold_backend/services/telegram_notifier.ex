@@ -26,8 +26,11 @@ defmodule GoldBackend.Services.TelegramNotifier do
 
   def notify(snapshot, opts \\ [])
 
+  def notify(%{cfd_plan: %{action: "wait"}}, _opts), do: :ok
+  def notify(%{ai_error: error}, _opts) when not is_nil(error), do: :ok
+
   def notify(%{cfd_plan: %{action: action}} = snapshot, opts)
-      when action in ["buy", "sell", "wait"] do
+      when action in ["buy", "sell"] do
     with :ok <- validate_config() do
       config = Application.get_env(:gold_backend, :telegram, [])
       token = config |> Keyword.fetch!(:bot_token) |> String.trim()

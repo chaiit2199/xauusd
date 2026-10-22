@@ -3,7 +3,11 @@ defmodule GoldBackend.Services.TelegramNotifierTest do
   import ExUnit.CaptureLog
   alias GoldBackend.Services.TelegramNotifier
 
-  @snapshot %{cfd_plan: %{action: "wait"}, ai_error: "AI chưa trả nhận định tiếng Việt hợp lệ."}
+  @snapshot %{
+    cfd_plan: %{action: "buy", entry: 2000, take_profit: 2020, stop_loss: 1990},
+    ai_error: nil,
+    ai_insight: "Giá nằm trên SMA20, động lượng tăng."
+  }
 
   setup do
     previous = Application.get_env(:gold_backend, :telegram)
@@ -36,21 +40,50 @@ defmodule GoldBackend.Services.TelegramNotifierTest do
     refute log =~ "12345"
   end
 
-  test "AI errors and wait decisions still send a notification" do
+  test "only final buy and sell decisions send a notification" do
     post = fn url, body, headers, _ ->
       send(self(), {:sent, url, Jason.decode!(body), headers})
       {:ok, %HTTPoison.Response{status_code: 200, body: ~s({"ok":true})}}
     end
 
-    assert :ok = TelegramNotifier.notify(@snapshot, http_post: post)
+    for {action, label} <- [{"buy", "Mua"}, {"sell", "Bán"}] do
+      snapshot = put_in(@snapshot, [:cfd_plan, :action], action)
+      assert :ok = TelegramNotifier.notify(snapshot, http_post: post)
 
-    assert_received {:sent, "https://api.telegram.org/bottest-token/sendMessage", payload,
-                     [{"Content-Type", "application/json"}]}
+      assert_received {:sent, "https://api.telegram.org/bottest-token/sendMessage", payload,
+                       [{"Content-Type", "application/json"}]}
 
-    assert payload["chat_id"] == "12345"
-    assert payload["text"] =~ "Không giao dịch"
-    assert payload["text"] =~ @snapshot.ai_error
-    refute payload["text"] =~ "SL:"
+      assert payload["chat_id"] == "12345"
+      assert payload["text"] =~ "Khuyến nghị: #{label}"
+      assert payload["text"] =~ "SL:"
+    end
+
+    refute_received {:sent, _, _, _}
+  end
+
+  test "wait, blocked trades and AI errors never send or require Telegram configuration" do
+    Application.put_env(:gold_backend, :telegram, [])
+    wait = %{cfd_plan: %{action: "wait"}, ai_error: nil}
+
+    snapshots = [
+      wait,
+      Map.put(wait, :ai_action, "buy"),
+      Map.put(wait, :ai_action, "sell"),
+      Map.put(wait, :ai_error, "Ollama quá thời gian"),
+      Map.put(@snapshot, :ai_error, "Nhận định không hợp lệ")
+    ]
+
+    log =
+      capture_log(fn ->
+        for snapshot <- snapshots do
+          assert :ok =
+                   TelegramNotifier.notify(snapshot,
+                     http_post: fn _, _, _, _ -> flunk("must not send") end
+                   )
+        end
+      end)
+
+    assert log == ""
   end
 
   test "Telegram API rejection is returned with actionable diagnostics and secrets redacted" do
