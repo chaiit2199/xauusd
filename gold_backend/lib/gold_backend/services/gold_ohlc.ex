@@ -1,6 +1,8 @@
 defmodule GoldBackend.Services.GoldOhlc do
   @moduledoc "Gold API range OHLC. One request per closed interval, never sampled quotes."
   @base "https://api.gold-api.com"
+  @max_quote_age_seconds 120
+  @max_future_skew_seconds 60
 
   def configured? do
     case Application.get_env(:gold_backend, :gold_api_key) do
@@ -63,18 +65,29 @@ defmodule GoldBackend.Services.GoldOhlc do
 
   # Freshness uses the provider timestamp, not the local HTTP receipt time.
   def quote(opts \\ []) do
-    now = Keyword.get(opts, :now, DateTime.utc_now())
+    with {:ok, data} <- get_json(@base <> "/price/XAU", [], opts) do
+      # Read the clock after HTTP completes so request latency is not clock skew.
+      now = Keyword.get_lazy(opts, :now, &DateTime.utc_now/0)
 
-    with {:ok, data} <- get_json(@base <> "/price/XAU", [], opts),
-         %{"symbol" => "XAU", "currency" => "USD", "updatedAt" => at} when is_binary(at) <- data,
+      with {:ok, quote} <- parse_quote(data) do
+        age = DateTime.diff(now, quote.timestamp)
+
+        cond do
+          age > @max_quote_age_seconds -> {:error, :stale_quote}
+          age < -@max_future_skew_seconds -> {:error, :clock_skew}
+          true -> {:ok, quote}
+        end
+      end
+    end
+  end
+
+  defp parse_quote(data) do
+    with %{"symbol" => "XAU", "currency" => "USD", "updatedAt" => at} when is_binary(at) <- data,
          {:ok, timestamp, _} <- DateTime.from_iso8601(at),
-         {:ok, price} <- number(data["price"]),
-         true <- price > 0,
-         age when age >= -5 and age <= 120 <- DateTime.diff(now, timestamp) do
+         {:ok, price} <- number(data["price"]) do
       {:ok, %{price: price, timestamp: timestamp}}
     else
-      {:error, reason} -> {:error, reason}
-      _ -> {:error, :stale_quote}
+      _ -> {:error, :invalid_quote}
     end
   end
 

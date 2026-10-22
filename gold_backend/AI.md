@@ -130,7 +130,14 @@ Luồng chạy tự động:
 1. `InsightCache` kích hoạt **35 giây sau** mốc :00/:15/:30/:45 để nguồn có thời
    gian cập nhật nến đã đóng. Khi khởi động, chờ mốc kế tiếp. Không chạy chồng tác vụ.
 2. `OhlcSync` kiểm tra `/price/XAU`: đúng XAU/USD và timestamp của nguồn không
-   cũ hơn 120 giây. Báo giá cũ/nguồn lỗi không được coi là thị trường đang hoạt động.
+   cũ hơn 120 giây so với giờ máy chủ. Cho phép timestamp nguồn đi trước máy chủ
+   tối đa 60 giây để chịu được độ lệch nhỏ (ví dụ VPS chậm 36 giây). Đồng hồ được
+   đọc sau khi nhận phản hồi HTTP. Timestamp đi trước hơn 60 giây trả `clock_skew`,
+   báo giá quá cũ trả `stale_quote`, sai cấu trúc/giá/timestamp trả `invalid_quote`;
+   cả ba trường hợp đều chặn gọi OHLC và hiển thị lý do riêng.
+   Đây là dung sai kiểm tra, không sửa đồng hồ VPS hay thay đổi lịch đóng nến M15/H1;
+   VPS vẫn cần đồng bộ NTP để lịch phân tích đúng giờ. Báo giá cũ/nguồn lỗi không
+   được coi là thị trường đang hoạt động.
 3. Lấy nến M15 vừa đóng, sau đó bổ sung một nến H1 còn thiếu. Khi đã có 50 H1 và
    giờ H1 mới nhất, dung lượng còn lại dùng để sửa khoảng trống M15 trong 50 nến gần nhất.
 4. `GoldOhlc` gửi API key qua header, dùng timestamp UTC, kiểm tra biên thời gian

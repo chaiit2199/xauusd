@@ -99,7 +99,15 @@ defmodule GoldBackend.Services.OhlcSync do
   defp message(:rate_limited), do: "Gold API giới hạn lượt gọi; tạm dừng OHLC trong một giờ."
 
   defp message(:stale_quote),
-    do: "Báo giá Gold API đã cũ hoặc thị trường đang đóng cửa; chờ dữ liệu mới."
+    do:
+      "Báo giá Gold API cũ hơn 120 giây so với giờ máy chủ; chờ dữ liệu mới hoặc kiểm tra đồng hồ máy chủ."
+
+  defp message(:clock_skew),
+    do:
+      "Thời gian báo giá Gold API đi trước máy chủ hơn 60 giây; cần kiểm tra đồng bộ giờ máy chủ."
+
+  defp message(:invalid_quote),
+    do: "Gold API trả báo giá XAU/USD không hợp lệ; chờ dữ liệu hợp lệ."
 
   defp message(:invalid_ohlc), do: "Gold API chưa trả OHLC hợp lệ cho khoảng nến yêu cầu."
   defp message(:not_settled), do: "Chờ thêm 30 giây sau đóng nến để nguồn cập nhật OHLC."

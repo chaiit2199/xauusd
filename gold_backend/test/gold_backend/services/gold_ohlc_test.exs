@@ -91,7 +91,16 @@ defmodule GoldBackend.Services.GoldOhlcTest do
   end
 
   test "provider timestamps detect stale weekend quotes and future clock errors" do
-    for {age, valid} <- [{0, true}, {120, true}, {121, false}, {3600, false}, {-6, false}] do
+    for {age, expected} <- [
+          {0, :ok},
+          {120, :ok},
+          {121, :stale_quote},
+          {3600, :stale_quote},
+          {-6, :ok},
+          {-36, :ok},
+          {-60, :ok},
+          {-61, :clock_skew}
+        ] do
       body = %{
         "symbol" => "XAU",
         "currency" => "USD",
@@ -106,9 +115,34 @@ defmodule GoldBackend.Services.GoldOhlcTest do
 
       result = GoldOhlc.quote(now: @now, http_get: get)
 
-      if valid,
+      if expected == :ok,
         do: assert(match?({:ok, _}, result)),
-        else: assert(result == {:error, :stale_quote})
+        else: assert(result == {:error, expected})
+    end
+  end
+
+  test "malformed quotes are distinct from old quotes and clock skew" do
+    valid = %{
+      "symbol" => "XAU",
+      "currency" => "USD",
+      "price" => 4100,
+      "updatedAt" => DateTime.to_iso8601(@now)
+    }
+
+    for changes <- [
+          %{"symbol" => "XAG"},
+          %{"currency" => nil},
+          %{"updatedAt" => nil},
+          %{"updatedAt" => "invalid"},
+          %{"price" => 0},
+          %{"price" => "NaN"}
+        ] do
+      get = fn _, _, _ ->
+        {:ok,
+         %HTTPoison.Response{status_code: 200, body: Jason.encode!(Map.merge(valid, changes))}}
+      end
+
+      assert GoldOhlc.quote(now: @now, http_get: get) == {:error, :invalid_quote}
     end
   end
 end
