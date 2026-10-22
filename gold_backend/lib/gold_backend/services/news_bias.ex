@@ -14,15 +14,20 @@ defmodule GoldBackend.Services.NewsBias do
 
   @long_horizon ~r/20[2-9]\d|forecast|dự báo|world gold council|hội đồng vàng|\bwgc\b|ngân hàng trung ương.*năm/i
 
-  def assess(articles) when is_list(articles) do
+  @event_risk_window_seconds 90 * 60
+
+  def assess(articles, now \\ DateTime.utc_now())
+
+  def assess(articles, %DateTime{} = now) when is_list(articles) do
     scored =
       articles
       |> Enum.take(12)
-      |> Enum.map(&score_article/1)
+      |> Enum.map(&score_article(&1, now))
 
     bull = Enum.count(scored, &(&1.tone == :bullish))
     bear = Enum.count(scored, &(&1.tone == :bearish))
     high_impact = Enum.any?(scored, & &1.high_impact)
+    trade_block = Enum.any?(scored, &(&1.high_impact and &1.recent))
 
     tone =
       cond do
@@ -38,14 +43,15 @@ defmodule GoldBackend.Services.NewsBias do
       bullish: bull,
       bearish: bear,
       high_impact: high_impact,
+      trade_block: trade_block,
       headlines: Enum.map(scored, & &1.line),
-      digest: digest(tone, bull, bear, high_impact, scored)
+      digest: digest(tone, bull, bear, high_impact, trade_block, scored)
     }
   end
 
-  def assess(_), do: assess([])
+  def assess(_, now), do: assess([], now)
 
-  defp score_article(article) do
+  defp score_article(article, now) do
     title =
       cond do
         is_binary(Map.get(article, :title_vi)) and article.title_vi != "" ->
@@ -68,6 +74,9 @@ defmodule GoldBackend.Services.NewsBias do
     long? = Regex.match?(@long_horizon, title)
     high? = not long? and Regex.match?(@high_impact, title)
 
+    recent? =
+      recent_article?(Map.get(article, :published_at) || Map.get(article, "published_at"), now)
+
     tone =
       cond do
         long? -> :context
@@ -79,9 +88,24 @@ defmodule GoldBackend.Services.NewsBias do
     %{
       tone: tone,
       high_impact: high?,
+      recent: recent?,
       line: "[#{bucket(tone, high?)} | #{source}] #{title}"
     }
   end
+
+  defp recent_article?(%DateTime{} = published_at, now) do
+    age = DateTime.diff(now, published_at, :second)
+    age >= 0 and age <= @event_risk_window_seconds
+  end
+
+  defp recent_article?(published_at, now) when is_binary(published_at) do
+    case DateTime.from_iso8601(published_at) do
+      {:ok, parsed, _offset} -> recent_article?(parsed, now)
+      _ -> false
+    end
+  end
+
+  defp recent_article?(_, _now), do: false
 
   defp bucket(:bullish, _), do: "ủng hộ vàng"
   defp bucket(:bearish, _), do: "đè vàng"
@@ -94,7 +118,7 @@ defmodule GoldBackend.Services.NewsBias do
   defp tone_label(:mixed), do: "Tin trái chiều"
   defp tone_label(:neutral), do: "Tin trung tính / ít tín hiệu"
 
-  defp digest(tone, bull, bear, high_impact, scored) do
+  defp digest(tone, bull, bear, high_impact, trade_block, scored) do
     top =
       scored
       |> Enum.reject(&(&1.tone == :neutral and not &1.high_impact))
@@ -104,9 +128,16 @@ defmodule GoldBackend.Services.NewsBias do
     base = "#{tone_label(tone)} (ủng hộ #{bull}, đè #{bear})."
 
     impact =
-      if high_impact,
-        do: " Có tin USD tác động mạnh — ưu tiên đứng ngoài quanh giờ ra số.",
-        else: ""
+      cond do
+        trade_block ->
+          " Có tin USD tác động mạnh mới xuất hiện — khóa lệnh 90 phút để tránh biến động sau tin."
+
+        high_impact ->
+          " Có dòng tin USD tác động mạnh nhưng đã ngoài cửa sổ khóa lệnh 90 phút."
+
+        true ->
+          ""
+      end
 
     if top == "", do: base <> impact, else: base <> impact <> " Tiêu điểm: #{top}"
   end

@@ -64,15 +64,61 @@ defmodule GoldBackend.Services.TradePlanTest do
       tone: :gold_bullish,
       tone_label: "Tin nghiêng ủng hộ vàng",
       high_impact: true,
+      trade_block: false,
       digest: "Tin nghiêng ủng hộ vàng (ủng hộ 2, đè 0)."
     }
 
-    plan = TradePlan.build(indicators(%{stochastic_k: 5.0, rsi_14: 32.0}), 4130.4, news_bias: bias)
+    plan =
+      TradePlan.build(indicators(%{stochastic_k: 5.0, rsi_14: 32.0}), 4130.4, news_bias: bias)
 
     assert plan.news_tone == "Tin nghiêng ủng hộ vàng"
     assert plan.news_digest =~ "ủng hộ vàng"
     assert Enum.any?(plan.notes, &String.contains?(&1, "ngược hướng"))
     assert plan.risk_score >= 7
+  end
+
+  test "recent high-impact USD news locks an otherwise valid sell" do
+    bias = %{
+      tone: :mixed,
+      tone_label: "Tin trái chiều",
+      high_impact: true,
+      trade_block: true,
+      digest: "Có tin USD tác động mạnh mới xuất hiện."
+    }
+
+    plan = TradePlan.build(indicators(%{}), 4130.4, news_bias: bias)
+
+    assert plan.action == "wait"
+    assert plan.block_reason =~ "Khóa lệnh 90 phút"
+  end
+
+  test "V reversal from below the lower band blocks a late sell" do
+    plan =
+      TradePlan.build(
+        indicators(%{
+          current_price: 4100.9,
+          sma_20: 4121.97,
+          ema_50: 4125.11,
+          rsi_14: 39.12,
+          macd: -8.8254,
+          bollinger_bands: %{upper: 4154.69, lower: 4089.24},
+          atr_14: 8.83,
+          stochastic_k: 28.0,
+          pivot_level: %{p: 4130.23, r1: 4139.37, s1: 4118.17},
+          roc_10: -0.99
+        }),
+        4100.9,
+        price_action: %{
+          low: 4069.8,
+          high: 4123.6,
+          rebound_from_low: 31.1,
+          pullback_from_high: 22.7
+        }
+      )
+
+    assert plan.action == "wait"
+    assert plan.block_reason =~ "Không bán đuổi"
+    assert plan.block_reason =~ "4069.80"
   end
 
   test "commentary that recommends a buy is replaced by the locked ticket" do
@@ -81,7 +127,7 @@ defmodule GoldBackend.Services.TradePlanTest do
     {:ok, text} =
       OllamaAnalyzer.align({:ok, "DeepSeek khuyên 3. Định kiến: Mua tại 4130."}, plan)
 
-    assert text =~ "Không giao dịch"
+    assert String.downcase(text) =~ "không giao dịch"
     refute text =~ "DeepSeek"
     refute text =~ "Định kiến: Mua"
   end

@@ -117,14 +117,16 @@ defmodule GoldBackendWeb.TradingController do
       {warmup, warmup_detail} = warmup_state(latest, live_ticks)
       events = EconomicCalendar.upcoming_usd(now)
       blocking = EconomicCalendar.blocking(events, now)
-      news_bias = NewsBias.assess(news)
+      news_bias = NewsBias.assess(news, now)
+      price_action = recent_price_action(prices, latest, now)
 
       plan =
         TradePlan.build(summary.indicators, entry,
           warmup: warmup,
           warmup_detail: warmup_detail,
           blocking_event: blocking,
-          news_bias: news_bias
+          news_bias: news_bias,
+          price_action: price_action
         )
 
       {:ok,
@@ -143,6 +145,27 @@ defmodule GoldBackendWeb.TradingController do
          price_ticks: length(prices)
        }}
     end
+  end
+
+  defp recent_price_action(prices, latest, now) do
+    cutoff = DateTime.add(now, -90 * 60, :second)
+
+    values =
+      prices
+      |> Enum.filter(&(&1.timestamp >= cutoff and &1.origin in @live_origins))
+      |> Enum.map(&(&1.price |> Decimal.round(4) |> Decimal.to_float()))
+
+    current = latest.price |> Decimal.round(4) |> Decimal.to_float()
+    low = if values == [], do: current, else: Enum.min(values)
+    high = if values == [], do: current, else: Enum.max(values)
+
+    %{
+      window_minutes: 90,
+      low: Float.round(low, 2),
+      high: Float.round(high, 2),
+      rebound_from_low: Float.round(max(current - low, 0.0), 2),
+      pullback_from_high: Float.round(max(high - current, 0.0), 2)
+    }
   end
 
   defp warmup_state(latest, live_ticks) do
@@ -177,7 +200,8 @@ defmodule GoldBackendWeb.TradingController do
       price_ticks_5d: context.price_ticks,
       live_price_ticks: context.live_price_ticks,
       hourly_samples: context.summary.hourly_samples,
-      indicator_basis: "Giá đóng cửa theo giờ, khung H1 · cửa sổ 5 ngày (~120 mẫu) cho SMA20/EMA50",
+      indicator_basis:
+        "Giá đóng cửa theo giờ, khung H1 · cửa sổ 5 ngày (~120 mẫu) cho SMA20/EMA50",
       warmup: context.warmup,
       warmup_detail: context.warmup_detail,
       recent_prices: recent_prices(context.prices),

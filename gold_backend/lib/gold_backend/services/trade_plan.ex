@@ -18,7 +18,7 @@ defmodule GoldBackend.Services.TradePlan do
     rr_after_spread = reward_after_spread(stop_usd, take_usd)
     signal_action = action(indicators, lean)
     news_bias = Keyword.get(opts, :news_bias)
-    block = block_reason(opts, rr_after_spread, signal_action)
+    block = block_reason(opts, rr_after_spread, signal_action, indicators, news_bias)
     action = if block, do: :wait, else: signal_action
     {stop_loss, take_profit} = levels(lean, entry, stop_usd, take_usd)
     score = risk_score(indicators, action, lean, block, news_bias)
@@ -147,9 +147,10 @@ defmodule GoldBackend.Services.TradePlan do
     end
   end
 
-  defp block_reason(opts, rr_after_spread, signal_action) do
+  defp block_reason(opts, rr_after_spread, signal_action, indicators, news_bias) do
     event = Keyword.get(opts, :blocking_event)
     warmup_detail = Keyword.get(opts, :warmup_detail)
+    price_action = Keyword.get(opts, :price_action, %{})
 
     cond do
       Keyword.get(opts, :warmup, false) ->
@@ -158,6 +159,12 @@ defmodule GoldBackend.Services.TradePlan do
 
       event ->
         "Sắp có tin #{event.title}. Chưa vào lệnh từ 30 phút trước đến 30 phút sau giờ ra tin."
+
+      news_trade_block?(news_bias) ->
+        "Tin USD tác động mạnh mới xuất hiện. Khóa lệnh 90 phút để tránh spread giãn và cú quét hai đầu sau tin."
+
+      v_reversal_against?(signal_action, indicators, price_action) ->
+        reversal_block_reason(signal_action, price_action)
 
       rr_after_spread < 1.5 ->
         "Phần lời sau phí vào lệnh chưa đủ lớn so với phần lỗ."
@@ -168,6 +175,35 @@ defmodule GoldBackend.Services.TradePlan do
       true ->
         nil
     end
+  end
+
+  defp news_trade_block?(%{trade_block: true}), do: true
+  defp news_trade_block?(_), do: false
+
+  defp v_reversal_against?(:sell, indicators, price_action) do
+    rebound = Map.get(price_action, :rebound_from_low, 0.0)
+    low = Map.get(price_action, :low)
+
+    is_number(low) and low <= indicators.bollinger_bands.lower and
+      rebound >= max(indicators.atr_14 * 1.5, 1.0)
+  end
+
+  defp v_reversal_against?(:buy, indicators, price_action) do
+    pullback = Map.get(price_action, :pullback_from_high, 0.0)
+    high = Map.get(price_action, :high)
+
+    is_number(high) and high >= indicators.bollinger_bands.upper and
+      pullback >= max(indicators.atr_14 * 1.5, 1.0)
+  end
+
+  defp v_reversal_against?(_, _indicators, _price_action), do: false
+
+  defp reversal_block_reason(:sell, price_action) do
+    "Không bán đuổi: giá vừa hồi #{usd(Map.get(price_action, :rebound_from_low, 0.0))} USD từ đáy #{usd(Map.get(price_action, :low, 0.0))} trong 90 phút sau khi quét biên dưới Bollinger."
+  end
+
+  defp reversal_block_reason(:buy, price_action) do
+    "Không mua đuổi: giá vừa giảm #{usd(Map.get(price_action, :pullback_from_high, 0.0))} USD từ đỉnh #{usd(Map.get(price_action, :high, 0.0))} trong 90 phút sau khi quét biên trên Bollinger."
   end
 
   defp stop_distance(indicators) do
@@ -336,7 +372,8 @@ defmodule GoldBackend.Services.TradePlan do
 
   defp liquidity_watchlist(_indicators, _entry, _action, _lean), do: []
 
-  defp watchlist_commentary([]), do: "Chưa có vùng quét thanh khoản đủ điều kiện từ dữ liệu H1 hiện tại."
+  defp watchlist_commentary([]),
+    do: "Chưa có vùng quét thanh khoản đủ điều kiện từ dữ liệu H1 hiện tại."
 
   defp watchlist_commentary(watchlist) do
     Enum.map_join(watchlist, "\n", fn zone ->
