@@ -211,6 +211,12 @@ button:disabled { opacity: 0.55; cursor: progress; }
 .choice.on.wait { color: #1c1406; background: var(--warn); border-color: var(--warn); }
 .ticket-top { justify-content: space-between; align-items: center; gap: 24px; margin-top: 16px; }
 .ticket-summary { margin: 0; max-width: 68ch; line-height: 1.55; font-size: 16px; }
+.ticket-news {
+  margin: 0 0 10px;
+  color: var(--muted);
+  font-size: 13px;
+  line-height: 1.45;
+}
 
 .risk {
   min-width: 180px;

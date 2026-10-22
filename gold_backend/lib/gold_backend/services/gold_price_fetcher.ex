@@ -9,8 +9,9 @@ defmodule GoldBackend.Services.GoldPriceFetcher do
      still moves when both upstreams are down
 
   An empty table is filled with five days of hourly prices around the latest
-  quote. Those rows are marked `origin: "seed"` so the UI can say they are
-  warmup history, not a live print.
+  quote (~120 bars). That window is what SMA20 / EMA50 / ATR need on H1.
+  Those rows are marked `origin: "seed"` so the ticket stays locked until a
+  few live market prints arrive — seed is indicator fuel, not a tradeable quote.
   """
 
   use GenServer

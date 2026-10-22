@@ -18,6 +18,7 @@ export function TradeTicket({ plan }: TradeTicketProps) {
         <div className={plan.action === "sell" ? "choice on sell" : "choice"}>Bán</div>
         <div className={plan.action === "wait" ? "choice on wait" : "choice"}>Không giao dịch</div>
       </div>
+      {plan.news_tone ? <p className="ticket-news">{plan.news_tone}</p> : null}
       <div className="ticket-top">
         <p className="ticket-summary">{plan.summary}</p>
         <div className={`risk risk-${tone}`}>
