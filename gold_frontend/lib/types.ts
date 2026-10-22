@@ -37,6 +37,7 @@ export type CfdPlan = {
   risk_label: string;
   market_state: string;
   block_reason: string | null;
+  entry_guard?: { blocked: boolean; reasons: string[] };
   news_tone?: string | null;
   news_digest?: string | null;
   summary: string;
@@ -45,6 +46,7 @@ export type CfdPlan = {
 };
 
 export type LiquidityWatchZone = {
+  order_type?: "sell_limit" | "buy_limit";
   id: string;
   side: "buy" | "sell";
   title: string;

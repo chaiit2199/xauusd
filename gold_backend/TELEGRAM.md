@@ -3,7 +3,8 @@
 Dockerfile không sao chép `rel/`, vì vậy cấu hình trong `rel/env.sh.eex` không
 được đưa vào image. Docker Compose nhận thông tin bot từ `env.sh` trên VPS.
 Chỉ gửi khi quyết định cuối cùng (`cfd_plan.action`) là `buy` hoặc `sell` và
-không có lỗi AI. `wait` / “Không giao dịch” không gửi, kể cả AI đề xuất Buy/Sell
+không có lỗi AI, và toàn bộ nhận định vượt qua kiểm tra tiếng Việt/chống lặp
+trước khi rút gọn tin nhắn. `wait` / “Không giao dịch” không gửi, kể cả AI đề xuất Buy/Sell
 nhưng điều kiện kiểm soát rủi ro đã khóa lệnh.
 
 1. Trên VPS, sửa `/home/deploy_user/xauusd/env.sh`, đặt đủ hai biến bằng giá trị

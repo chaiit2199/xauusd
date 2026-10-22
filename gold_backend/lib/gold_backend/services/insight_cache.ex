@@ -112,10 +112,11 @@ defmodule GoldBackend.Services.InsightCache do
       snapshot = TradingController.analysis_snapshot(context, action, reason, error)
 
       snapshot =
-        if snapshot.cfd_plan.action != Atom.to_string(action) do
+        if is_nil(snapshot.ai_error) and snapshot.cfd_plan.action != Atom.to_string(action) do
           %{
             snapshot
-            | ai_insight: reason <> "\nĐiều kiện khóa lệnh: " <> snapshot.cfd_plan.block_reason
+            | ai_insight:
+                snapshot.ai_insight <> "\nĐiều kiện khóa lệnh: " <> snapshot.cfd_plan.block_reason
           }
         else
           snapshot

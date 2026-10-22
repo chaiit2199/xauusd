@@ -19,6 +19,64 @@ Kết quả JSON hoàn chỉnh nằm trong code fence hoặc sau phần `<think>
 dịch đổi action vẫn bị từ chối. Bước dịch chỉ được thử một lần; đây không phải
 bảo đảm rằng model luôn trả đúng tiếng Việt.
 
+## Chặn nhận định lặp hoặc lẫn ngôn ngữ
+
+Bộ kiểm tra không còn chấp nhận một đoạn tiếng Anh chỉ vì có một từ tiếng Việt
+có dấu. Nhận định phải dài 80–2.400 ký tự; tối thiểu 25% từ diễn giải chứa dấu
+tiếng Việt (bỏ qua mã tài sản, chỉ báo và các chữ viết tắt tài chính phổ biến).
+Cụm 4–12 từ lặp ít nhất 3 lần và chiếm phần đáng kể của đoạn bị từ chối.
+Unicode được chuẩn hóa trước khi kiểm tra.
+
+Nội dung lặp bị từ chối ngay, không đem dịch vì không có lập luận đáng tin cậy
+để giữ nguyên. Nội dung chưa đạt yêu cầu tiếng Việt được dịch tối đa một lần;
+bản dịch cũng phải qua kiểm tra chất lượng và giữ nguyên action. Các ngưỡng này
+là kiểm tra hình thức, không chứng minh nhận định đúng về ngữ nghĩa hoặc số liệu.
+
+Snapshot kiểm tra lại nhận định trước khi công bố. Khi không hợp lệ, kết quả là
+`wait`, `ai_action: null`, kèm `ai_error`; không dùng đoạn lỗi làm lý do giao dịch.
+Telegram kiểm tra lại toàn bộ nhận định trước khi rút gọn và gửi, kể cả khi
+snapshot mang action Buy/Sell và chưa có `ai_error`. Không thay model hay temperature.
+
+## Quy tắc điểm vào: không bán đáy, không mua đỉnh
+
+`EntryRules` là lớp kiểm soát bằng mã, áp dụng cả với action từ AI và tín hiệu
+kỹ thuật. Khi vi phạm, `cfd_plan.action` là `wait`; `entry_guard.reasons` giải
+thích các điều kiện chưa đạt trên giao diện. AI không có quyền bỏ qua lớp này.
+Các khóa do dữ liệu khởi tạo, lịch tin, tin mạnh và đảo chiều chữ V vẫn giữ nguyên.
+
+| Điều kiện | SELL | BUY |
+| --- | --- | --- |
+| Xu hướng | Giá < SMA20, MACD < 0 | Giá > SMA20, MACD > 0 |
+| Chặn RSI cực đoan | RSI < 35 | RSI > 65 |
+| Chặn Stochastic | %K < 30 | %K > 75 |
+| RSI cho điểm vào | 45–55, gồm hai biên | 45–50, gồm hai biên |
+| Bollinger | Giá ≤ dải dưới + 0,25 ATR | Giá ≥ dải trên − 0,25 ATR |
+| Xa SMA20 | SMA20 − giá > 2 ATR | Giá − SMA20 > 2 ATR |
+| Vùng cản đối diện | Cách S1/Pivot phía dưới ≤ 0,25 ATR | Cách R1/Pivot phía trên ≤ 0,25 ATR |
+| Vị trí chờ vào | Trong 0,5 ATR của SMA20 hoặc S1 đã retest | Trong 0,5 ATR của SMA20 hoặc R1 đã retest |
+
+Nếu giá đã thủng S1 hoặc vượt R1, cần quan sát lần lượt phá mức → quay lại trong
+±0,25 ATR → tiếp diễn qua mức hơn 0,25 ATR. Dùng các báo giá thị trường thật,
+sắp theo thời gian trong 90 phút; không suy ra retest từ High/Low. Thiếu chuỗi
+hoặc chuỗi bắt đầu sau lúc phá mức thì chưa xác nhận được retest. Một lần phá
+mới sau khi giá quay lại phía đối diện làm mất xác nhận cũ. Đây là xác nhận trên
+mẫu giá; hệ thống chưa có OHLC để tự xác nhận mẫu nến H1.
+
+Khi chờ, chỉ hiện kịch bản cùng xu hướng: Sell Limit phía trên giá hiện tại hoặc
+Buy Limit phía dưới, quanh SMA20 trong 0,5 ATR. SL/TP tham chiếu tính lại từ vùng
+chờ; không tạo kịch bản bắt đáy ngược xu hướng. Các kịch bản chưa phải lệnh đã đặt
+và vẫn yêu cầu kiểm tra lại điều kiện, xác nhận nến H1 trước khi sử dụng. Dữ liệu
+khởi tạo không xuất vùng đặt lệnh chờ.
+
+Quy ước 0,25 / 0,5 / 2 ATR cụ thể hóa các khái niệm “sát vùng”, “hồi về” và “quá
+xa”; đây là tham số chiến lược, chưa phải kết quả tối ưu hoặc backtest. ATR hiện
+là trung bình biến động giá đóng cửa H1, không phải True Range từ OHLC; dùng sàn
+0,5 USD giống phép tính SL hiện có. Mọi vùng giá tính từ dữ liệu hiện tại.
+
+Quá mua/quá bán không bảo đảm đảo chiều; mục tiêu của bộ lọc là tránh vào đuổi,
+không chứng minh một lệnh chắc chắn có lợi nhuận. Tham khảo
+[Fidelity về RSI trong xu hướng mạnh](https://www.fidelity.com/learning-center/trading-investing/technical-analysis/technical-indicator-guide/RSI).
+
 ## Cấu hình trên VPS
 
 Trong `/home/deploy_user/xauusd/env.sh`, giữ nguyên dòng `OLLAMA_MODEL` và thêm

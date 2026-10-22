@@ -33,6 +33,11 @@ export function TradeTicket({ plan, aiAction }: TradeTicketProps) {
         </div>
       </div>
 
+      {plan.entry_guard?.blocked ? <details className="calculator-notes">
+        <summary>Điều kiện vào lệnh · {plan.entry_guard.reasons.length} điều kiện chưa đạt</summary>
+        <ul className="ticket-notes">{plan.entry_guard.reasons.map((reason) => <li key={reason}>{reason}</li>)}</ul>
+      </details> : null}
+
       {order ? <div className="levels">
         <article className="level level-entry">
           <p>Điểm vào</p>
@@ -80,7 +85,7 @@ export function TradeTicket({ plan, aiAction }: TradeTicketProps) {
         <section className="watchlist" aria-label="Kịch bản chờ xác nhận">
           <div className="watchlist-head">
             <div>
-              <p className="eyebrow">Liquidity sweep · H1</p>
+              <p className="eyebrow">Hồi giá / Retest · H1</p>
               <h3>Kịch bản chờ xác nhận</h3>
             </div>
             <span>Chờ xác nhận</span>

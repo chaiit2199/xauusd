@@ -26,8 +26,8 @@ export function IndicatorGrid({ indicators, alerts }: IndicatorGridProps) {
     {
       label: "RSI 14",
       value: num(indicators.rsi_14),
-      note: "Quá mua ≥ 70 · quá bán ≤ 30",
-      tone: indicators.rsi_14 >= 70 || indicators.rsi_14 <= 30 ? "warn" : "neutral",
+      note: "Chặn SELL < 35 · BUY > 65",
+      tone: indicators.rsi_14 > 65 || indicators.rsi_14 < 35 ? "warn" : "neutral",
     },
     {
       label: "MACD",
@@ -53,8 +53,8 @@ export function IndicatorGrid({ indicators, alerts }: IndicatorGridProps) {
     {
       label: "Stochastic %K",
       value: num(indicators.stochastic_k),
-      note: "Quá mua ≥ 80 · quá bán ≤ 20",
-      tone: indicators.stochastic_k >= 80 || indicators.stochastic_k <= 20 ? "warn" : "neutral",
+      note: "Chặn SELL < 30 · BUY > 75",
+      tone: indicators.stochastic_k > 75 || indicators.stochastic_k < 30 ? "warn" : "neutral",
     },
     {
       label: "Pivot",

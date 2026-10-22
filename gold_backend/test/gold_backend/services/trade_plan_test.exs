@@ -6,7 +6,7 @@ defmodule GoldBackend.Services.TradePlanTest do
   test "a downtrend with room to sell places the stop above entry and the target below" do
     plan =
       TradePlan.build(
-        indicators(%{rsi_14: 44.0, stochastic_k: 40.0, macd: -2.0, roc_10: -0.4}),
+        indicators(%{rsi_14: 48.0, stochastic_k: 40.0, macd: -2.0, roc_10: -0.4}),
         4130.4
       )
 
@@ -28,9 +28,9 @@ defmodule GoldBackend.Services.TradePlanTest do
       TradePlan.build(
         indicators(%{
           current_price: 200.0,
-          sma_20: 190.0,
+          sma_20: 199.8,
           ema_50: 180.0,
-          rsi_14: 58.0,
+          rsi_14: 48.0,
           macd: 1.5,
           roc_10: 0.8,
           stochastic_k: 55.0,
@@ -141,26 +141,27 @@ defmodule GoldBackend.Services.TradePlanTest do
     assert plan.stop_loss > plan.entry
     assert plan.take_profit < plan.entry
     assert plan.risk_score >= 7
-    assert [short, long] = plan.watchlist
+    assert [short] = plan.watchlist
     assert short.side == "sell"
     assert short.entry_low < short.entry_high
     assert short.stop_loss > short.entry_high
-    assert long.side == "buy"
-    assert long.stop_loss < long.entry_low
+    assert short.order_type == "sell_limit"
+    assert short.entry_low > plan.entry
+    assert short.condition =~ "RSI 45–55"
   end
 
   defp indicators(overrides) do
     Map.merge(
       %{
         current_price: 4130.4,
-        sma_20: 4137.7,
+        sma_20: 4131.2,
         ema_50: 4140.11,
-        rsi_14: 44.0,
+        rsi_14: 48.0,
         macd: -3.3,
-        bollinger_bands: %{upper: 4145.45, lower: 4129.94},
+        bollinger_bands: %{upper: 4145.45, lower: 4128.0},
         atr_14: 2.0,
         stochastic_k: 40.0,
-        pivot_level: %{p: 4145.13, r1: 4152.16, s1: 4134.05},
+        pivot_level: %{p: 4145.13, r1: 4152.16, s1: 4120.0},
         roc_10: -0.2,
         volatility_std: 3.8
       },

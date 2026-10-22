@@ -5,7 +5,7 @@ defmodule GoldBackend.Services.AiReasonQualityTest do
   alias GoldBackendWeb.TradingController
 
   @reported "Tù trending H1 với giá 4078.7 và chỉ báo principal, diagonal và positive technical indicators, diagonal positive technical indicators. Ví dụ, diagonal positive technical indicators, principal technical indicator, diagonal positive technical indicators, principal technical indicator, diagonal positive technical indicators, principal technical ind..."
-  @valid "Giá 4078.7 nằm dưới SMA20 4106.66, MACD -14.3237 cho thấy động lượng giảm. RSI 36.63 chưa xác nhận đảo chiều. Kịch bản bán mất hiệu lực nếu giá vượt vùng cắt lỗ; cần theo dõi rủi ro từ tin kinh tế. Chưa có đủ dữ liệu tin mới để đánh giá tác động."
+  @valid "Giá 4078.7 nằm dưới SMA20 4082.0, MACD -14.3237 cho thấy động lượng giảm. RSI 50.0 chưa xác nhận đảo chiều. Kịch bản bán mất hiệu lực nếu giá vượt vùng cắt lỗ; cần theo dõi rủi ro từ tin kinh tế. Chưa có đủ dữ liệu tin mới để đánh giá tác động."
 
   test "rejects the reported mixed-language repetition before notification truncation" do
     assert {:error, error} = AiDecision.parse(%{"action" => "sell", "reason" => @reported})
@@ -75,12 +75,28 @@ defmodule GoldBackend.Services.AiReasonQualityTest do
     assert snapshot.cfd_plan.stop_loss == 4095.98
   end
 
+  test "a valid AI sell still becomes wait when the entry violates the pullback rules" do
+    context = context()
+    context = %{context | indicators: %{context.indicators | sma_20: 4106.66, rsi_14: 36.63}}
+    snapshot = TradingController.analysis_snapshot(context, :sell, @valid, nil)
+    assert snapshot.ai_error == nil
+    assert snapshot.ai_action == "sell"
+    assert snapshot.cfd_plan.action == "wait"
+    assert snapshot.cfd_plan.entry_guard.blocked
+    assert snapshot.cfd_plan.block_reason =~ "hơn 2 ATR"
+
+    assert :ok =
+             TelegramNotifier.notify(snapshot,
+               http_post: fn _, _, _, _ -> flunk("must not send blocked sell") end
+             )
+  end
+
   defp context do
     indicators = %{
       current_price: 4078.7,
-      sma_20: 4106.66,
+      sma_20: 4082.0,
       ema_50: 4110.0,
-      rsi_14: 36.63,
+      rsi_14: 50.0,
       macd: -14.3237,
       atr_14: 8.64,
       stochastic_k: 40.0,

@@ -7,11 +7,14 @@ defmodule GoldBackend.Services.TradePlan do
   the stop, and a stop wider than 5× ATR is not used.
   """
 
+  alias GoldBackend.Services.EntryRules
+
   @point 0.01
   @spread 0.40
 
   def build(indicators, entry, opts \\ []) when is_number(entry) do
     entry = round2(entry)
+    indicators = %{indicators | current_price: entry}
     requested = Keyword.get(opts, :ai_action)
     lean = if requested in [:buy, :sell], do: requested, else: lean(indicators)
     stop_usd = stop_distance(indicators)
@@ -22,7 +25,8 @@ defmodule GoldBackend.Services.TradePlan do
       if requested in [:buy, :sell, :wait], do: requested, else: action(indicators, lean)
 
     news_bias = Keyword.get(opts, :news_bias)
-    block = block_reason(opts, rr_after_spread, signal_action, indicators, news_bias)
+    entry_guard = EntryRules.assess(indicators, lean, Keyword.get(opts, :price_action, %{}))
+    block = block_reason(opts, rr_after_spread, signal_action, indicators, news_bias, entry_guard)
     action = if block, do: :wait, else: signal_action
     {stop_loss, take_profit} = levels(lean, entry, stop_usd, take_usd)
     score = risk_score(indicators, action, lean, block, news_bias)
@@ -50,11 +54,16 @@ defmodule GoldBackend.Services.TradePlan do
       risk_score: score,
       risk_label: risk_label(score),
       block_reason: block,
+      entry_guard: entry_guard,
       news_tone: news_tone(news_bias),
       news_digest: news_digest(news_bias),
       summary: summary(action, lean, risk_label(score), block, indicators),
       notes: notes(indicators, lean, stop_usd, news_bias),
-      watchlist: liquidity_watchlist(indicators, entry, action, lean)
+      watchlist:
+        if(Keyword.get(opts, :warmup, false),
+          do: [],
+          else: pullback_watchlist(indicators, entry, action)
+        )
     }
   end
 
@@ -151,7 +160,7 @@ defmodule GoldBackend.Services.TradePlan do
     end
   end
 
-  defp block_reason(opts, rr_after_spread, signal_action, indicators, news_bias) do
+  defp block_reason(opts, rr_after_spread, signal_action, indicators, news_bias, entry_guard) do
     event = Keyword.get(opts, :blocking_event)
     warmup_detail = Keyword.get(opts, :warmup_detail)
     price_action = Keyword.get(opts, :price_action, %{})
@@ -180,6 +189,9 @@ defmodule GoldBackend.Services.TradePlan do
       signal_action == :sell and
           (indicators.current_price >= indicators.sma_20 or indicators.macd >= 0) ->
         "Điều kiện bán không phù hợp với SMA20 hoặc MACD."
+
+      entry_guard.blocked ->
+        hd(entry_guard.reasons)
 
       signal_action == :wait ->
         "Tín hiệu chưa cùng một hướng."
@@ -336,56 +348,77 @@ defmodule GoldBackend.Services.TradePlan do
       indicators.current_price <= indicators.bollinger_bands.lower + indicators.atr_14
   end
 
-  # These are observation zones, not executable orders.  They are only shown
-  # during an oversold H1 sell sweep, so the ticket itself remains the source
-  # of truth and stays at "wait" until its normal confirmation rules pass.
-  defp liquidity_watchlist(indicators, entry, :wait, :sell) do
-    if downtrend?(indicators) and indicators.rsi_14 <= 35 and indicators.stochastic_k <= 20 do
-      atr = max(indicators.atr_14, 0.5)
-      resistance_low = min(indicators.sma_20, indicators.ema_50)
-      resistance_high = max(indicators.sma_20, indicators.ema_50)
-      support = round2(entry - 4 * atr)
-      short_entry_low = round2(resistance_low - 0.6 * atr)
-      short_entry_high = round2(resistance_low)
-      short_stop = round2(resistance_high + 0.9 * atr)
-      long_entry_low = round2(support + 0.25 * atr)
-      long_entry_high = round2(support + 0.75 * atr)
+  # Conditional observation plans only: never executable pending orders.
+  # Follow the actual trend, including when an AI proposes the opposite side.
+  defp pullback_watchlist(indicators, entry, :wait) do
+    side = EntryRules.trend(indicators)
+    atr = max(indicators.atr_14, 0.5)
+    sma = indicators.sma_20
 
-      [
-        %{
-          id: "short-retest",
-          side: "sell",
-          title: "Canh bán khi hồi kiểm tra kháng cự",
-          priority: "Ưu tiên",
-          condition: "Chỉ theo dõi khi giá hồi vùng SMA20/EMA50 và có nến H1 từ chối giá.",
-          entry_low: short_entry_low,
-          entry_high: short_entry_high,
-          stop_loss: short_stop,
-          take_profit: support,
-          reward_risk: rr(short_entry_low, short_stop, support)
-        },
-        %{
-          id: "long-sweep",
-          side: "buy",
-          title: "Bắt hồi sau cú quét hỗ trợ",
-          priority: "Thăm dò nhỏ",
-          condition: "Chỉ theo dõi nếu vùng hỗ trợ tạo pin bar hoặc bullish engulfing trên H1.",
-          entry_low: long_entry_low,
-          entry_high: long_entry_high,
-          stop_loss: round2(support - atr),
-          take_profit: round2(support + 5.6 * atr),
-          reward_risk: rr(long_entry_high, round2(support - atr), round2(support + 5.6 * atr))
-        }
-      ]
-    else
-      []
+    case side do
+      :sell ->
+        low = round2(max(sma - 0.5 * atr, entry + @point))
+        high = round2(sma)
+        stop = round2(high + 2 * atr)
+        target = round2(low - 2 * (stop - low))
+
+        if low < high and target > 0 do
+          [
+            %{
+              id: "sell-pullback",
+              side: "sell",
+              order_type: "sell_limit",
+              title: "Sell Limit · Chờ hồi về kháng cự",
+              priority: "Theo xu hướng H1",
+              condition:
+                "Chờ RSI 45–55, Stochastic ≥ 30 và giá hồi vùng SMA20. Chỉ cân nhắc sau nến H1 từ chối giá; kiểm tra lại toàn bộ điều kiện vào lệnh. Chưa đặt lệnh.",
+              entry_low: low,
+              entry_high: high,
+              stop_loss: stop,
+              take_profit: target,
+              reward_risk: rr(low, stop, target)
+            }
+          ]
+        else
+          []
+        end
+
+      :buy ->
+        low = round2(sma)
+        high = round2(min(sma + 0.5 * atr, entry - @point))
+        stop = round2(low - 2 * atr)
+        target = round2(high + 2 * (high - stop))
+
+        if low < high and stop > 0 do
+          [
+            %{
+              id: "buy-pullback",
+              side: "buy",
+              order_type: "buy_limit",
+              title: "Buy Limit · Chờ điều chỉnh về hỗ trợ",
+              priority: "Theo xu hướng H1",
+              condition:
+                "Chờ RSI 45–50, Stochastic ≤ 75 và giá điều chỉnh về SMA20. Chỉ cân nhắc sau nến H1 giữ hỗ trợ; kiểm tra lại toàn bộ điều kiện vào lệnh. Chưa đặt lệnh.",
+              entry_low: low,
+              entry_high: high,
+              stop_loss: stop,
+              take_profit: target,
+              reward_risk: rr(high, stop, target)
+            }
+          ]
+        else
+          []
+        end
+
+      :wait ->
+        []
     end
   end
 
-  defp liquidity_watchlist(_indicators, _entry, _action, _lean), do: []
+  defp pullback_watchlist(_indicators, _entry, _action), do: []
 
   defp watchlist_commentary([]),
-    do: "Chưa có vùng quét thanh khoản đủ điều kiện từ dữ liệu H1 hiện tại."
+    do: "Chưa có vùng hồi/retest phù hợp từ dữ liệu H1 hiện tại."
 
   defp watchlist_commentary(watchlist) do
     Enum.map_join(watchlist, "\n", fn zone ->

@@ -175,7 +175,10 @@ defmodule GoldBackendWeb.TradingController do
 
     values =
       prices
-      |> Enum.filter(&(&1.timestamp >= cutoff and &1.origin in @live_origins))
+      |> Enum.filter(
+        &(&1.timestamp >= cutoff and &1.timestamp <= now and &1.origin in @live_origins)
+      )
+      |> Enum.sort_by(& &1.timestamp, DateTime)
       |> Enum.map(&(&1.price |> Decimal.round(4) |> Decimal.to_float()))
 
     current = latest.price |> Decimal.round(4) |> Decimal.to_float()
@@ -184,6 +187,7 @@ defmodule GoldBackendWeb.TradingController do
 
     %{
       window_minutes: 90,
+      prices: values,
       low: Float.round(low, 2),
       high: Float.round(high, 2),
       rebound_from_low: Float.round(max(current - low, 0.0), 2),
