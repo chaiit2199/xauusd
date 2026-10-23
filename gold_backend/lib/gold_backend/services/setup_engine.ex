@@ -38,7 +38,10 @@ defmodule GoldBackend.Services.SetupEngine do
       technical_context: context,
       supporting_evidence: [],
       candidate_count: 0,
+      branches: [],
+      rejected_candidates: [],
       setup_kind: nil,
+      rejection_reason: nil,
       invalidation_price: nil
     }
 
@@ -80,9 +83,13 @@ defmodule GoldBackend.Services.SetupEngine do
               name = pattern(last, prev, zone, side),
               name != nil,
               bias.side != "neutral" or name == "breakout_retest",
-              not Map.has_key?(zone, :side) or zone.side == side,
+              not Map.has_key?(zone, :side) or (zone.side == side and name == "breakout_retest"),
               entry_side?(zone, side) or name == "breakout_retest",
               do: candidate(base, last, zone, name, side)
+
+        branches = branch_statuses(candidates, touched, breakouts, sides, bias)
+        rejected = Enum.filter(candidates, &(&1.rejection_reason == "stop_cap"))
+        base = %{base | branches: branches, rejected_candidates: rejected}
 
         cond do
           not StrategyPolicy.h1_ready?(bias) ->
@@ -99,7 +106,8 @@ defmodule GoldBackend.Services.SetupEngine do
             %{
               base
               | state: "wait_zoi",
-                reason: "Chờ giá hồi về ZOI; chưa xét mẫu nến ngoài vùng."
+                reason:
+                  "Chưa có tương tác vùng phù hợp; nhánh hồi và breakout–retest đang được xét độc lập."
             }
 
           candidates == [] ->
@@ -117,7 +125,13 @@ defmodule GoldBackend.Services.SetupEngine do
           true ->
             # Evaluate every touched zone; input order must not hide a viable setup.
             selected = Enum.max_by(candidates, &rank/1)
-            %{selected | candidate_count: length(candidates)}
+
+            %{
+              selected
+              | candidate_count: length(candidates),
+                branches: branches,
+                rejected_candidates: rejected
+            }
         end
     end
   end
@@ -153,15 +167,10 @@ defmodule GoldBackend.Services.SetupEngine do
 
     target = if barrier, do: if(side == "buy", do: barrier.low, else: barrier.high)
 
-    if risk <= 0 or risk > StrategyPolicy.max_stop_atr() * base.atr or stop <= 0 or
-         (is_number(target) and target <= 0) do
-      %{base | state: "invalid_levels", reason: "SL vượt 5 ATR M15 hoặc mức giá không hợp lệ."}
-    else
+    base =
       %{
         base
-        | blocked: false,
-          action: side,
-          state: "ready",
+        | action: side,
           pattern: name,
           setup_kind:
             if(name == "breakout_retest", do: "breakout_retest", else: "trend_pullback"),
@@ -169,11 +178,75 @@ defmodule GoldBackend.Services.SetupEngine do
           zone: zone,
           barrier: barrier,
           stop_loss: Float.round(stop, 2),
-          take_profit: if(target, do: Float.round(target * 1.0, 2)),
+          take_profit: if(target, do: Float.round(target * 1.0, 2))
+      }
+      |> GoldBackend.Services.SetupLifecycle.identify()
+
+    if risk <= 0 or risk > StrategyPolicy.max_stop_atr() * base.atr or stop <= 0 or
+         (is_number(target) and target <= 0) do
+      %{
+        base
+        | state: "invalid_levels",
+          reason: "SL vượt 5 ATR M15 hoặc mức giá không hợp lệ.",
+          rejection_reason:
+            if(risk > StrategyPolicy.max_stop_atr() * base.atr,
+              do: "stop_cap",
+              else: "invalid_price"
+            )
+      }
+    else
+      %{
+        base
+        | blocked: false,
+          state: "ready",
           supporting_evidence: MarketStructure.evidence(base.technical_context, side, zone),
           reason: "M15 đã đóng xác nhận #{pattern_label(name)} tại #{zone.id}."
       }
-      |> GoldBackend.Services.SetupLifecycle.identify()
+    end
+  end
+
+  defp branch_statuses(candidates, touched, breakouts, sides, bias) do
+    for kind <- ["trend_pullback", "breakout_retest"], side <- sides do
+      matches = Enum.filter(candidates, &(&1.setup_kind == kind and &1.action == side))
+
+      touched_branch =
+        Enum.any?(touched, fn z ->
+          if kind == "trend_pullback",
+            do: not Map.has_key?(z, :side) and entry_side?(z, side),
+            else: Map.get(z, :side) == side
+        end)
+
+      {status, reason} =
+        cond do
+          not StrategyPolicy.h1_ready?(bias) ->
+            {"unknown", "Chờ dữ liệu H1 hợp lệ."}
+
+          Map.get(bias, :regime) == "transition" ->
+            {"unknown", "H1 đang chuyển hướng; chờ xác nhận bối cảnh."}
+
+          kind == "trend_pullback" and bias.side == "neutral" ->
+            {"warning", "H1 trung tính: chưa xét lệnh hồi theo xu hướng."}
+
+          Enum.any?(matches, &(not &1.blocked)) ->
+            {"pass", "Đã có xác nhận M15; còn kiểm tra giá mới, lịch tin và giới hạn rủi ro."}
+
+          matches != [] ->
+            {"blocked", "Có mẫu xác nhận nhưng SL vượt giới hạn hoặc mức giá không hợp lệ."}
+
+          touched_branch ->
+            {"unknown", "Đã chạm vùng của nhánh; chờ mẫu M15 xác nhận."}
+
+          kind == "breakout_retest" and not Enum.any?(breakouts, &(&1.side == side)) ->
+            {"unknown", "Chờ phá vỡ hợp lệ và retest; không vào theo phá vỡ chưa retest."}
+
+          kind == "breakout_retest" ->
+            {"unknown", "Đã có vùng sau phá vỡ; chờ retest hợp lệ."}
+
+          true ->
+            {"unknown", "Chờ giá tương tác vùng hồi theo xu hướng."}
+        end
+
+      %{kind: kind, side: side, status: status, reason: reason, candidate_count: length(matches)}
     end
   end
 

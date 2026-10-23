@@ -49,29 +49,30 @@ defmodule GoldBackend.Services.InsightCache do
   def resolve(_), do: peek()
 
   def expire_snapshot(data, now) do
+    data = data |> expire_analysis(now) |> expire_quote(now) |> expire_calendar(now)
     expiry = get_in(data, [:cfd_plan, :setup_expires_at])
 
     case if(is_binary(expiry), do: DateTime.from_iso8601(expiry), else: :none) do
       {:ok, at, _} ->
         if DateTime.compare(now, at) != :lt,
           do: invalidate(data, "Setup đã hết hạn; chờ xác nhận mới.", "expired"),
-          else: expire_calendar(data, now)
+          else: data
 
       _ ->
-        expire_calendar(data, now)
+        data
     end
   end
 
   defp expire_calendar(data, now) do
     case Map.get(data, :calendar_valid_until) do
       nil ->
-        expire_quote(data, now)
+        data
 
       value when is_binary(value) ->
         case DateTime.from_iso8601(value) do
           {:ok, at, _} ->
             if DateTime.compare(now, at) == :lt,
-              do: expire_quote(data, now),
+              do: data,
               else: invalidate(data, "Lịch tin đã hết hiệu lực; chờ xác minh lại.")
 
           _ ->
@@ -87,14 +88,14 @@ defmodule GoldBackend.Services.InsightCache do
           {:ok, at, _} ->
             if DateTime.compare(now, at) != :lt,
               do: invalidate(data, "Báo giá đã quá hạn; chờ kiểm tra giá mới."),
-              else: expire_analysis(data, now)
+              else: data
 
           _ ->
             invalidate(data, "Thời hạn báo giá không hợp lệ.")
         end
 
       _ ->
-        expire_analysis(data, now)
+        data
     end
   end
 
@@ -125,6 +126,12 @@ defmodule GoldBackend.Services.InsightCache do
         true -> "m15_data"
       end
 
+    state =
+      if code == "quote" and Map.get(data.cfd_plan, :planning_action) in ["buy", "sell"] and
+           Map.get(data.cfd_plan, :setup_status) not in ["paused", "news_window"],
+         do: "awaiting_quote",
+         else: state
+
     Map.merge(data, %{
       rule_action: "wait",
       ai_action: nil,
@@ -150,6 +157,7 @@ defmodule GoldBackend.Services.InsightCache do
               reason
             )
         })
+        |> GoldBackend.Services.StrategyPlan.suspend_current_entry(reason)
     })
   end
 

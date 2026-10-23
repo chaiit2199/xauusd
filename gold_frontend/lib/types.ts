@@ -20,7 +20,7 @@ export type RuleCheck = {
   status: "pass" | "blocked" | "unknown" | "warning";
   reason: string;
   required?: boolean;
-  scope?: "required" | "setup" | "advisory";
+  scope?: "required" | "setup" | "advisory" | "current_entry";
 };
 
 export type CfdPlan = {
@@ -30,13 +30,18 @@ export type CfdPlan = {
   market: string;
   action: "buy" | "sell" | "wait";
   action_label: string;
+  planning_action?: "buy" | "sell" | "wait";
+  current_entry_status?: "unchecked" | "eligible" | "blocked";
+  entry_admission?: string | null;
+  price_basis?: "live_quote" | "m15_close";
+  quote_at?: string | null;
   lean: "buy" | "sell" | "neutral";
   bias?: { side: "buy" | "sell" | "neutral"; reason: string; adx: number | null; slope: number | null; locked_until: string | null };
   setup_label?: string;
   strategy_version?: string;
   mode?: "signals_only";
   setup_id?: string | null;
-  setup_status?: "watching" | "wait_confirmation" | "wait_pullback" | "wait_target" | "signal_ready" | "expired" | "invalidated" | "paused" | "news_window";
+  setup_status?: "watching" | "wait_confirmation" | "wait_pullback" | "wait_target" | "signal_ready" | "expired" | "invalidated" | "paused" | "news_window" | "awaiting_quote";
   decision_plan?: DecisionPlan;
   setup_formed_at?: string | null;
   setup_expires_at?: string | null;
@@ -61,7 +66,7 @@ export type CfdPlan = {
   take_points: number;
   point_size: number;
   reward_risk: number;
-  reward_risk_after_spread: number;
+  reward_risk_after_spread: number | null;
   spread: number;
   risk_score: number;
   risk_label: string;
@@ -133,6 +138,7 @@ export type M15Setup = {
 };
 
 export type MarketBoard = {
+  rule_action?: "buy" | "sell" | "wait";
   calendar_valid_until?: string | null;
   signal_valid_until?: string | null;
   next_evaluation_at?: string;
@@ -185,13 +191,25 @@ export type RuleStatistics = {
   days: number;
   evaluations: number;
   checks: { code: string; evaluated: number; pass: number; blocked: number; unknown: number; warning?: number; sole_blocker: number }[];
+  stop_cap?: { evaluations: number; candidates: number; sole_candidates: number };
 };
 
 export type DecisionPlan = {
   side: "buy" | "sell" | "neutral";
   source: string;
+  reference_entry?: number | null;
+  reference_at?: string | null;
+  reference_reward_risk?: number | null;
+  current_entry_status?: "unchecked" | "eligible" | "blocked";
+  current_entry?: number | null;
+  current_quote_at?: string | null;
   evidence: string[];
   candidate_count?: number;
+  branches?: { kind: string; side: string; status: "pass" | "blocked" | "unknown" | "warning"; reason: string; candidate_count: number }[];
+  branches_at?: string | null;
+  setup_kind?: string | null;
+  entry_admission?: string | null;
+  entry_policy?: string;
   cost_sensitivity?: { stress_cost: number; stress_reward_risk: number; max_cost_for_min_rr: number } | null;
   supporting_evidence?: { code: string; supports: boolean; reason: string }[];
   technical_context?: {
@@ -226,10 +244,14 @@ export type SignalHistoryData = {
   model: string;
   limit: number;
   summary: Record<string, number>;
+  groups?: { version: string; side: string; setup_kind: string; entry_admission: string; signals: number; settled: number; outcomes: Record<string, number>; estimated_net_r: number | null; settled_drawdown_r: number | null }[];
   items: {
     setup_id: string;
     side: "buy" | "sell";
     version: string;
+    setup_kind?: string;
+    entry_admission?: string;
+    estimated_net_r?: number | null;
     published_at: string;
     expires_at: string | null;
     horizon_at: string | null;

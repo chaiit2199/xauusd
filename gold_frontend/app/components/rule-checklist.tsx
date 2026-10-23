@@ -14,15 +14,17 @@ export function RuleIcon({ status }: { status: RuleCheck["status"] }) {
 
 export function RuleChecklist({ checks }: { checks: RuleCheck[] }) {
   const counts = checkCounts(checks);
+  const dataBlockers = checks.filter((check) => check.required !== false && check.status !== "pass" && ["data", "m15_data", "quote", "calendar_data"].includes(check.code));
   return <section className="rule-checklist" aria-label="Kiểm tra điều kiện phát tín hiệu">
     <h3>Kiểm tra điều kiện</h3>
     <div className="rule-legend">{(Object.keys(labels) as RuleCheck["status"][]).map((status) =>
       <span key={status}><RuleIcon status={status}/>{labels[status]} <strong>{counts[status]}</strong></span>
     )}</div>
-    <p className="basis">Điều kiện bắt buộc phải đạt trước khi phát tín hiệu. Khuyến nghị không tự chặn BUY/SELL; điều kiện theo setup chỉ áp dụng cho nhánh đang xét.</p>
+    <p className="basis">Điều kiện bắt buộc phải đạt trước khi phát tín hiệu. Khuyến nghị không tự chặn BUY/SELL. “Theo setup” vẫn bắt buộc với nhánh đang xét; điểm vô hiệu bị phá thì setup phải hủy.</p>
+    {dataBlockers.length ? <div className="banner bad"><strong>Dữ liệu đang chặn phát tín hiệu</strong><ul>{dataBlockers.map((check) => <li key={check.code}>{check.reason}</li>)}</ul></div> : null}
     <ul className="rule-cards">{checks.map((check) => {
       const status = checkState(check);
-      const scope = check.required === false ? "Không bắt buộc" : check.scope === "setup" ? "Theo setup" : "Bắt buộc";
+      const scope = check.scope === "current_entry" ? (check.required === false ? "Entry hiện tại · khuyến nghị" : "Bắt buộc khi xét entry hiện tại") : check.required === false ? "Không bắt buộc" : check.scope === "setup" ? "Bắt buộc theo setup" : "Bắt buộc";
       return <li key={check.code} className={`rule-card rule-card-${status}`}>
         <RuleIcon status={status}/><div><div className="rule-card-heading"><strong>{ruleLabels[check.code] ?? check.code}</strong><span>{scope}</span></div>
         <p><span className={`rule-state rule-${status}`}>{labels[status]}</span> · {check.reason}</p></div>

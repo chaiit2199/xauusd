@@ -189,13 +189,16 @@ defmodule GoldBackend.Services.SignalHistory do
           setup_id: row.setup_id,
           side: row.plan["action"],
           version: row.plan["strategy_version"],
+          setup_kind: row.plan["setup_kind"] || "unknown",
+          entry_admission: row.plan["entry_admission"] || "unclassified",
           published_at: iso(utc(row.published_at) || utc(row.fallback_at)),
           expires_at: iso(expiry),
           horizon_at: iso(utc(row.horizon_at)),
           validity: validity,
           validity_reason: row.reason,
           plan: row.plan["decision_plan"],
-          result: row.result || %{"status" => "legacy", "entry_touched" => false}
+          result: row.result || %{"status" => "legacy", "entry_touched" => false},
+          estimated_net_r: estimated_net_r(row.plan, row.result)
         }
       end)
 
@@ -203,8 +206,56 @@ defmodule GoldBackend.Services.SignalHistory do
       items: items,
       limit: limit,
       model: "m15-touch-v1",
-      summary: Enum.frequencies_by(items, & &1.result["status"])
+      summary: Enum.frequencies_by(items, & &1.result["status"]),
+      groups: summarize_groups(items)
     }
+  end
+
+  # Reference-price touch model; no fills, gap slippage, fees or account sizing.
+  def estimated_net_r(plan, %{"status" => status, "entry_price" => entry})
+      when status in ["tp_first", "sl_first"] and is_number(entry) do
+    stop = plan["stop_loss"]
+    target = plan["take_profit"]
+    cost = plan["spread"]
+
+    if is_number(stop) and is_number(target) and is_number(cost) and cost >= 0 and
+         abs(entry - stop) > 0 do
+      reward = if plan["action"] == "buy", do: target - entry, else: entry - target
+      if status == "sl_first", do: -1.0, else: (reward - cost) / (abs(entry - stop) + cost)
+    end
+  end
+
+  def estimated_net_r(_, _), do: nil
+
+  def summarize_groups(items) do
+    items
+    |> Enum.group_by(&{&1.version, &1.side, &1.setup_kind, &1.entry_admission})
+    |> Enum.map(fn {{version, side, kind, admission}, rows} ->
+      settled =
+        rows
+        |> Enum.filter(&is_number(&1.estimated_net_r))
+        |> Enum.sort_by(&{&1.published_at, &1.setup_id})
+
+      {net, _, drawdown} =
+        Enum.reduce(settled, {0.0, 0.0, 0.0}, fn row, {total, peak, dd} ->
+          total = total + row.estimated_net_r
+          peak = max(peak, total)
+          {total, peak, max(dd, peak - total)}
+        end)
+
+      %{
+        version: version,
+        side: side,
+        setup_kind: kind,
+        entry_admission: admission,
+        signals: length(rows),
+        settled: length(settled),
+        outcomes: Enum.frequencies_by(rows, & &1.result["status"]),
+        estimated_net_r: if(settled != [], do: Float.round(net, 2)),
+        settled_drawdown_r: if(settled != [], do: Float.round(drawdown, 2))
+      }
+    end)
+    |> Enum.sort_by(&{&1.version, &1.entry_admission, &1.side, &1.setup_kind})
   end
 
   defp utc(nil), do: nil

@@ -159,7 +159,8 @@ defmodule GoldBackendWeb.TradingController do
             execution_ready: false,
             block_reason: reason,
             summary: reason
-          }),
+          })
+          |> GoldBackend.Services.StrategyPlan.suspend_current_entry(reason),
         else: context.plan
 
     context = %{context | plan: plan}

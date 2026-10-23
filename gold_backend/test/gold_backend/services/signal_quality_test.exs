@@ -120,7 +120,7 @@ defmodule GoldBackend.Services.SignalQualityTest do
 
     plan = StrategyPlan.build(@indicators, 3990.0, opts)
     assert plan.action == "wait"
-    assert plan.setup_status == "paused"
+    assert plan.setup_status == "awaiting_quote"
   end
 
   test "notification refuses an expired quote before any network call" do
@@ -241,7 +241,7 @@ defmodule GoldBackend.Services.SignalQualityTest do
     assert updated.plan.entry == 4002.4
     assert updated.plan.entry_limit == 2.4
     assert updated.plan.action == "wait"
-    assert StrategyPlan.revalidate(context, nil, @now).plan.setup_status == "paused"
+    assert StrategyPlan.revalidate(context, nil, @now).plan.setup_status == "awaiting_quote"
 
     stale =
       StrategyPlan.revalidate(

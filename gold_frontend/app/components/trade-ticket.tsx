@@ -19,13 +19,14 @@ export function TradeTicket({ plan }: TradeTicketProps) {
     wait_pullback: "Chờ hồi về vùng vào", signal_ready: "Đủ điều kiện phát tín hiệu",
     expired: "Setup đã hết hạn", invalidated: "Setup đã vô hiệu",
     paused: "Tạm dừng · Chờ dữ liệu hợp lệ", news_window: "Tạm dừng quanh tin quan trọng",
+    awaiting_quote: "Có kế hoạch · Chưa kiểm tra entry hiện tại",
     wait_target: "Chờ vùng cản để xác định TP",
   };
 
   return (
     <section className={`ticket action-${plan.action}`} aria-labelledby="decision-title">
       <div className="panel-head">
-        <h2 id="decision-title">Kế hoạch BUY / SELL</h2>
+        <h2 id="decision-title">{plan.planning_action && plan.planning_action !== "wait" ? `Kế hoạch ${plan.planning_action.toUpperCase()}` : "Kế hoạch BUY / SELL"}</h2>
         <p>{plan.timeframe ?? "H1"} · {plan.market_state}</p>
       </div>
       {plan.setup_status ? <div className="signal-status" aria-live="polite">
@@ -33,6 +34,8 @@ export function TradeTicket({ plan }: TradeTicketProps) {
         <div><span className="eyebrow">Trạng thái setup</span><strong>{states[plan.setup_status]}</strong></div>
         <div><span className="eyebrow">Thực thi</span><strong>Chỉ phát tín hiệu</strong><span>Không ghi nhận lệnh khớp hoặc vị thế.</span></div>
       </div> : null}
+      {plan.current_entry_status === "unchecked" && plan.planning_action && plan.planning_action !== "wait" ? <p className="banner warn" role="status">Chưa kiểm tra entry hiện tại. Kế hoạch dựa trên nến M15 đóng lúc {when(plan.setup_formed_at ?? null)}; cần báo giá mới và kiểm tra lại hiệu lực trước khi sử dụng.</p> : null}
+      {plan.current_entry_status ? <p className="basis">Đánh giá entry tại giá hiện tại</p> : null}
       <div className="decision" role="group" aria-label={`Tín hiệu: ${actionLabel(plan.action)}`}>
         {(["buy", "sell", "wait"] as const).map((action) => (
           <div key={action} className={`choice${plan.action === action ? ` on ${action}` : ""}`} aria-current={plan.action === action ? "true" : undefined}>
@@ -51,13 +54,13 @@ export function TradeTicket({ plan }: TradeTicketProps) {
           <div><dt>Xác nhận lúc</dt><dd>{when(plan.setup_formed_at ?? null)}</dd></div>
           <div><dt>Giá tham chiếu ban đầu</dt><dd>{money(plan.reference_entry ?? 0)}</dd></div>
           <div><dt>ATR M15 tại xác nhận</dt><dd>{money(plan.reference_atr ?? 0)}</dd></div>
-          <div><dt>Lệch bất lợi / tối đa</dt><dd>{plan.entry_adverse != null && plan.entry_limit != null ? `${money(plan.entry_adverse)} / ${money(plan.entry_limit)}` : "Chưa đánh giá"}</dd></div>
+          <div><dt>Lệch bất lợi / ngưỡng cảnh báo</dt><dd>{plan.entry_adverse != null && plan.entry_limit != null ? `${money(plan.entry_adverse)} / ${money(plan.entry_limit)}` : "Chưa đánh giá"}</dd></div>
           <div><dt>SL / TP cố định</dt><dd>{money(plan.stop_loss)} / {money(plan.take_profit)}</dd></div>
           {plan.barrier ? <div><dt>Vùng cản phía trước</dt><dd>{money(plan.barrier.low)} – {money(plan.barrier.high)}</dd></div> : null}
         </dl>
       </details> : null}
       {visibleFlags?.map((flag) => <p className="banner warn" key={flag}>{flag}</p>)}
-      {plan.mode === "signals_only" ? <p className="basis">Cấu hình thử nghiệm · Entry ≤ 0,30 ATR M15 · SL ≤ 5 ATR · R:R ước tính ≥ 1,5. Mỗi setup chỉ phát tín hiệu một lần.</p> : null}
+      {plan.mode === "signals_only" ? <p className="basis">Cấu hình thử nghiệm · Lệch entry &gt; 0,30 ATR: cảnh báo · SL ≤ 5 ATR · R:R ước tính ≥ 1,5. Mỗi setup chỉ phát tín hiệu một lần.</p> : null}
       {plan.checks ? <RuleChecklist checks={plan.checks}/> : null}
       {!plan.checks && plan.entry_guard?.blocked ? (
         <details className="analysis-details">

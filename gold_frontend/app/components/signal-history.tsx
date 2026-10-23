@@ -13,6 +13,8 @@ const outcomes: Record<string, string> = {
   data_gap: "Thiếu dữ liệu · chưa kết luận", legacy: "Tín hiệu cũ · không có mô phỏng",
 };
 const validity = { active: "Còn hiệu lực", expired: "Hết hạn", invalidated: "Bị vô hiệu", unknown: "Chưa xác định hiệu lực" };
+const admissionLabel = (value?: string) => value === "late_entry" ? "Nhận thêm · entry muộn" : value === "reference_band" ? "Trong ngưỡng 0,30 ATR" : "Chưa phân nhóm";
+const branchLabel = (value?: string) => value === "trend_pullback" ? "Hồi theo xu hướng" : value === "breakout_retest" ? "Breakout–retest" : "Chưa phân nhánh";
 
 export function SignalHistory() {
   const [data, setData] = useState<SignalHistoryData | null>(null);
@@ -34,11 +36,25 @@ export function SignalHistory() {
     {error ? <p className="banner bad" role="alert">{data ? "Lịch sử chưa cập nhật. " : ""}{error}</p> : null}
     {data && data.items.length > 0 ? <>
       <div className="history-summary"><span>TP trước: <strong>{data.summary.tp_first ?? 0}</strong></span><span>SL trước: <strong>{data.summary.sl_first ?? 0}</strong></span><span>Không xác định: <strong>{data.summary.ambiguous ?? 0}</strong></span></div>
+      {data.groups?.length ? <details className="analysis-details">
+        <summary>So sánh nhóm entry · {data.items.length} tín hiệu gần nhất</summary>
+        <p className="basis">Phân nhóm theo giá lúc phát tín hiệu, không đổi khi giá chạy tiếp. R mô phỏng trừ spread đã lưu; chỉ tính các mẫu biết TP/SL chạm trước. Không gồm phí, trượt giá hoặc kết quả chưa xác định.</p>
+        <p className="basis">Sụt giảm R là mức giảm từ đỉnh của tổng R mẫu đã kết thúc, xếp theo thời điểm phát; không phải sụt giảm tài khoản. Bảng chỉ dùng các tín hiệu đang tải, chưa phải kiểm thử ngoài mẫu.</p>
+        <div className="rule-table-scroll"><table className="rule-table">
+          <thead><tr><th>Phiên bản / nhánh</th><th>Nhóm</th><th>Tín hiệu</th><th>TP / SL</th><th>Đủ dữ liệu tính R</th><th>Tổng R ước tính</th><th>Sụt giảm R</th></tr></thead>
+          <tbody>{data.groups.map((group) => <tr key={`${group.version}-${group.side}-${group.setup_kind}-${group.entry_admission}`}>
+            <th scope="row">{group.side.toUpperCase()} · {branchLabel(group.setup_kind)}<br />{group.version}</th>
+            <td>{admissionLabel(group.entry_admission)}</td><td>{group.signals}</td><td>{group.outcomes.tp_first ?? 0} / {group.outcomes.sl_first ?? 0}</td><td>{group.settled}</td><td>{group.estimated_net_r ?? "Chưa có"}</td><td>{group.settled_drawdown_r ?? "Chưa có"}</td>
+          </tr>)}</tbody>
+        </table></div>
+      </details> : null}
       {data.items.map((item) => <details className="history-item" key={item.setup_id}>
         <summary><strong>{item.side.toUpperCase()}</strong><span>{when(item.published_at)}</span><span>{validity[item.validity === "active" && item.expires_at && Date.now() >= Date.parse(item.expires_at) ? "expired" : item.validity]}</span><strong>{outcomes[item.result.status] ?? "Chưa đánh giá"}</strong></summary>
         {item.validity_reason ? <p className="basis">{item.validity_reason}</p> : null}
         <dl className="setup-facts">
           <div><dt>Phiên bản rule</dt><dd>{item.version}</dd></div>
+          <div><dt>Nhánh / nhóm lúc phát</dt><dd>{branchLabel(item.setup_kind)} · {admissionLabel(item.entry_admission)}</dd></div>
+          <div><dt>Kết quả sau spread mô phỏng</dt><dd>{item.estimated_net_r != null ? `${item.estimated_net_r.toFixed(2)} R` : "Chưa đủ dữ liệu"}</dd></div>
           <div><dt>Quan sát từ</dt><dd>{when(item.result.observed_from ?? null)}</dd></div>
           <div><dt>Đã kiểm tra tới</dt><dd>{when(item.result.observed_through ?? null)}</dd></div>
           <div><dt>Chạm vùng entry</dt><dd>{item.result.entry_touched ? `Có${item.result.entry_price != null ? ` · ${money(item.result.entry_price)}` : ""}` : "Chưa ghi nhận"}</dd></div>

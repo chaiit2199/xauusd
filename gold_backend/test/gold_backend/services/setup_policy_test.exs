@@ -110,6 +110,52 @@ defmodule GoldBackend.Services.SetupPolicyTest do
     assert plan(pullback, %{@neutral | side: "buy"}).action == "buy"
   end
 
+  test "directional breakout runs independently while the old pullback zone is untouched" do
+    mirror =
+      Enum.map(
+        bars(),
+        &%{
+          &1
+          | open: 200 - &1.open,
+            close: 200 - &1.close,
+            high: 200 - &1.low,
+            low: 200 - &1.high
+        }
+      )
+
+    for {input, side, low, high} <- [{bars(), "buy", 50.0, 51.0}, {mirror, "sell", 149.0, 150.0}] do
+      bias = %{@neutral | side: side, regime: side}
+      old_zone = %{id: "sma20_h1", low: low, high: high, mid: (low + high) / 2}
+      s = SetupEngine.assess(input, bias, [old_zone], @now)
+      assert s.state == "ready" and s.setup_kind == "breakout_retest"
+      assert plan(s, bias).action == side
+      pullback = Enum.find(s.branches, &(&1.kind == "trend_pullback"))
+      breakout = Enum.find(s.branches, &(&1.kind == "breakout_retest"))
+      assert pullback.status == "unknown" and pullback.candidate_count == 0
+      assert breakout.status == "pass" and breakout.side == side
+    end
+  end
+
+  test "rejected wide stops retain levels for auditing without hiding an eligible alternative" do
+    wide = %{id: "sma20_h1", low: 50.0, high: 101.0, mid: 100.0}
+    bias = %{@neutral | side: "buy", regime: "buy"}
+    s = SetupEngine.assess(bars(), bias, [wide], @now)
+    assert s.state == "ready"
+    assert plan(s, bias).action == "buy"
+    assert [rejected] = s.rejected_candidates
+    assert rejected.blocked and rejected.rejection_reason == "stop_cap"
+    assert is_binary(rejected.id) and rejected.stop_loss < 50.0
+    assert rejected.take_profit > 109.0 and rejected.take_profit < 110.0
+  end
+
+  test "a failed retest cannot be relabeled as a pullback at the newly formed breakout zone" do
+    input =
+      bars() |> List.update_at(-1, &%{&1 | open: 101.2, close: 101.4, low: 100.7, high: 101.5})
+
+    bias = %{@neutral | side: "buy", regime: "buy"}
+    assert SetupEngine.assess(input, bias, [], @now).blocked
+  end
+
   test "neutral H1 cannot manufacture a pinbar setup without a breakout" do
     input =
       bars()

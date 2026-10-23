@@ -10,9 +10,25 @@ defmodule GoldBackend.Services.DecisionPlan do
     stop = Map.get(setup, :stop_loss)
     barrier = Map.get(setup, :barrier)
 
+    reference_rr =
+      if confirmed and is_number(target) and is_number(setup.entry) and
+           valid_price?(setup, setup.entry),
+         do:
+           round2(
+             GoldBackend.Services.EntryQuality.assess(setup, setup.entry, plan.spread).reward_risk
+           )
+
+    live = Map.get(plan, :price_basis) == "live_quote"
+
     %{
       side: plan.lean,
       source: "Gold API · XAU/USD · Giá tham chiếu",
+      reference_entry: if(confirmed, do: setup.entry),
+      reference_at: Map.get(setup, :formed_at),
+      reference_reward_risk: reference_rr,
+      current_entry_status: Map.get(plan, :current_entry_status, "unchecked"),
+      current_entry: if(live, do: plan.entry),
+      current_quote_at: Map.get(plan, :quote_at),
       technical_context: Map.get(setup, :technical_context),
       supporting_evidence:
         GoldBackend.Services.MarketStructure.evidence(
@@ -21,6 +37,11 @@ defmodule GoldBackend.Services.DecisionPlan do
           zone
         ),
       candidate_count: Map.get(setup, :candidate_count, 0),
+      branches: Map.get(setup, :branches, []),
+      branches_at: Map.get(setup, :candle_closed_at),
+      setup_kind: Map.get(setup, :setup_kind),
+      entry_admission: Map.get(plan, :entry_admission),
+      entry_policy: "rr_constrained",
       cost_sensitivity: cost_sensitivity(setup, plan.entry, plan.spread),
       evidence: [
         plan.bias.reason,
@@ -54,14 +75,19 @@ defmodule GoldBackend.Services.DecisionPlan do
           else: "Chưa có vùng cản đã xác nhận để chốt TP."
         ),
       reward_risk:
-        if(confirmed and is_number(target) and valid_price?(setup, plan.entry),
+        if(live and confirmed and is_number(target) and valid_price?(setup, plan.entry),
           do:
             round2(
               GoldBackend.Services.EntryQuality.assess(setup, plan.entry, plan.spread).reward_risk
             ),
           else: nil
         ),
-      reward_risk_basis: "R:R tại giá tham chiếu đang hiển thị; đánh giá lại khi giá thay đổi.",
+      reward_risk_basis:
+        if(live,
+          do: "R:R tại báo giá mới của nguồn; đánh giá lại khi giá thay đổi.",
+          else:
+            "Chưa kiểm tra entry hiện tại. R:R tham chiếu dùng giá đóng nến xác nhận; không chứng minh còn vào được."
+        ),
       cost: %{
         spread: plan.spread,
         source: plan.spread_source,
@@ -90,7 +116,16 @@ defmodule GoldBackend.Services.DecisionPlan do
 
   def entry_zone(%{take_profit: target} = s, cost) when is_number(target) do
     r = StrategyPolicy.min_reward_risk()
-    limit = StrategyPolicy.entry_atr() * s.atr
+    # The 0.30 ATR band is advisory in v6. The nearest barrier still constrains
+    # the interval even if a future target policy chooses a more distant TP.
+    barrier = Map.get(s, :barrier)
+
+    target =
+      if barrier do
+        if s.action == "buy", do: min(target, barrier.low), else: max(target, barrier.high)
+      else
+        target
+      end
 
     breakout = Map.get(s, :setup_kind) == "breakout_retest"
 
@@ -99,7 +134,6 @@ defmodule GoldBackend.Services.DecisionPlan do
 
       high =
         Enum.min([
-          s.entry + limit,
           s.stop_loss + StrategyPolicy.max_stop_atr() * s.atr,
           (target + r * s.stop_loss) / (1 + r) - cost
         ])
@@ -108,7 +142,6 @@ defmodule GoldBackend.Services.DecisionPlan do
     else
       low =
         Enum.max([
-          s.entry - limit,
           s.stop_loss - StrategyPolicy.max_stop_atr() * s.atr,
           (target + r * s.stop_loss) / (1 + r) + cost
         ])

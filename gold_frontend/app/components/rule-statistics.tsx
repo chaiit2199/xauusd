@@ -7,6 +7,7 @@ export function RuleStatistics({ data }: { data: Statistics }) {
   return <details className="panel analysis-details">
     <summary>Thống kê điều kiện · {data.evaluations} lần đánh giá / {data.days} ngày</summary>
     <p className="basis">“Chặn duy nhất” chỉ đếm khi mọi điều kiện bắt buộc khác đều đạt; bỏ qua các khuyến nghị. Đây là thống kê bộ lọc, chưa phải kết quả lời/lỗ.</p>
+    {data.stop_cap ? <p className="basis">Theo dõi trần SL 5 ATR: {data.stop_cap.candidates} ứng viên bị loại; {data.stop_cap.sole_candidates} ứng viên chỉ vướng trần SL ở ít nhất một lần đánh giá đầy đủ. Đã kiểm tra {data.stop_cap.evaluations} lượt; không phát tín hiệu từ các ứng viên này.</p> : null}
     {data.checks.length ? <div className="rule-table-scroll">
       <table className="rule-table">
         <caption>Bộ rule {data.version}</caption>

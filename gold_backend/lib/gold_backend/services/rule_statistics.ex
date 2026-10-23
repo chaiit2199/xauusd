@@ -14,7 +14,27 @@ defmodule GoldBackend.Services.RuleStatistics do
           select: e.snapshot
       )
 
-    %{version: version, days: 7, evaluations: length(rows), checks: summarize(rows)}
+    %{
+      version: version,
+      days: 7,
+      evaluations: length(rows),
+      checks: summarize(rows),
+      stop_cap: stop_caps(rows)
+    }
+  end
+
+  def stop_caps(rows) do
+    samples = Enum.flat_map(rows, &Map.get(&1, "stop_cap_audit", []))
+
+    %{
+      evaluations: length(samples),
+      candidates: samples |> Enum.uniq_by(& &1["setup_id"]) |> length(),
+      sole_candidates:
+        samples
+        |> Enum.filter(&(&1["sole_blocker"] == true))
+        |> Enum.uniq_by(& &1["setup_id"])
+        |> length()
+    }
   end
 
   def summarize(rows) do
@@ -43,7 +63,9 @@ defmodule GoldBackend.Services.RuleStatistics do
           })
 
         status =
-          case if(c["required"] == false and c["status"] != "pass",
+          case if(
+                 c["required"] == false and c["status"] != "pass" and
+                   c["scope"] != "current_entry",
                  do: "warning",
                  else: c["status"]
                ) do

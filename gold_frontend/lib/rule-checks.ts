@@ -5,12 +5,13 @@ export const ruleLabels: Record<string, string> = {
   trigger: "Xác nhận M15", direction: "Đồng hướng H1", setup_lifetime: "Thời hạn setup",
   structure: "Điểm vô hiệu", calendar_data: "Dữ liệu lịch tin", calendar_window: "Cửa sổ tin",
   session: "Khung giờ ưu tiên", market_open: "Hoạt động thị trường", quote: "Độ mới báo giá", entry_drift: "Lệch entry",
+  current_entry: "Báo giá để kiểm tra entry hiện tại",
   levels: "SL / TP", barrier_room: "Khoảng trống tới vùng cản", reward_risk: "R:R ước tính và vùng cản",
   setup_invalidation: "Setup đã vô hiệu", setup_target: "Mục tiêu chưa bị chạm", target_structure: "Mục tiêu TP",
 };
 
 export function checkState(check: RuleCheck): RuleCheck["status"] {
-  if (check.required === false && check.status !== "pass") return "warning";
+  if (check.required === false && check.status !== "pass" && check.scope !== "current_entry") return "warning";
   return check.status;
 }
 

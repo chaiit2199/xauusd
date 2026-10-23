@@ -1,6 +1,6 @@
 defmodule GoldBackend.Services.StrategyPolicy do
   @moduledoc "Versioned experimental signal parameters; no broker execution or position accounting."
-  def version, do: "zoi-v5-setup-policy"
+  def version, do: "zoi-v6-entry-flex"
   def assumed_spread, do: 0.4
   def simulation_seconds, do: 7200
   def entry_atr, do: 0.30

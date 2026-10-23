@@ -37,6 +37,10 @@ test("expiry cannot leave green checks for a stale quote or calendar", () => {
   assert.equal(checks.session, "warning");
   assert.match(paused.ai_error, /Lịch tin/);
   const stale = expireAnalysis({ ...board, calendar_valid_until: null }, Date.parse(board.signal_valid_until));
-  assert.equal(stale.cfd_plan.checks.find(c => c.code === "quote").status, "blocked");
+  assert.equal(stale.cfd_plan.checks.find(c => c.code === "quote").status, "warning");
   assert.equal(board.cfd_plan.checks[0].status, "pass");
+});
+
+test("unverified advisory entry drift stays waiting instead of becoming a recommendation", () => {
+  assert.equal(checkState({ code: "entry_drift", status: "unknown", required: false, scope: "current_entry" }), "unknown");
 });

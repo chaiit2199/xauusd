@@ -2,7 +2,7 @@ defmodule GoldBackend.Services.DecisionPlanTest do
   use ExUnit.Case, async: true
   alias GoldBackend.Services.{DecisionPlan, EntryQuality}
 
-  test "every price in the entry interval preserves structure, drift, stop distance and RR" do
+  test "every price in the entry interval preserves structure, stop distance and RR" do
     buy = %{
       action: "buy",
       entry: 4000.0,
@@ -27,7 +27,7 @@ defmodule GoldBackend.Services.DecisionPlanTest do
       for price <- [zone.low, (zone.low + zone.high) / 2, zone.high] do
         q = EntryQuality.assess(setup, price, cost)
 
-        assert q.drift_ok and q.structure_ok and q.levels_ok and q.reward_risk_ok,
+        assert q.structure_ok and q.levels_ok and q.reward_risk_ok,
                inspect({setup.action, cost, price, q})
       end
     end

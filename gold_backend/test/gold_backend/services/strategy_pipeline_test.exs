@@ -170,12 +170,12 @@ defmodule GoldBackend.Services.StrategyPipelineTest do
     assert plan.action == "wait"
     statuses = Map.new(plan.checks, &{&1.code, &1.status})
     assert statuses["session"] == "warning"
-    assert statuses["quote"] == "blocked"
+    assert statuses["quote"] == "warning"
     assert statuses["calendar_data"] == "unknown"
     assert statuses["reward_risk"] == "unknown"
   end
 
-  test "spread cost, stale quote and adverse entry drift cannot be ignored" do
+  test "spread cost, stale quote and a deteriorated RR still block entry" do
     setup = SetupEngine.assess(triggered(), @bias, [@zone, @resistance], @now)
     i = %{current_price: 101.0, sma_20: 100.0, macd: 1.0, rsi_14: 53.0}
 
@@ -189,7 +189,11 @@ defmodule GoldBackend.Services.StrategyPipelineTest do
       assert StrategyPlan.build(i, setup.entry, opts).action == "wait"
     end
 
-    assert StrategyPlan.build(i, setup.entry + 2, options(setup)).action == "wait"
+    assert StrategyPlan.build(
+             i,
+             setup.entry + 2,
+             Keyword.put(options(setup), :quote, %{price: setup.entry + 2, timestamp: @now})
+           ).action == "wait"
   end
 
   test "a confirmation without a structural target waits instead of inventing two R" do

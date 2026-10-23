@@ -55,7 +55,66 @@ Snapshot kiểm tra lại bình luận trước khi hiển thị. Khi không h�
 Telegram kiểm tra bình luận trước khi sử dụng; nếu chưa có bình luận hợp lệ,
 thông báo dùng lý do từ rule. Không thay model hay temperature.
 
-## Bộ tín hiệu hiện hành: zoi-v5-setup-policy
+## Bộ tín hiệu hiện hành: zoi-v6-entry-flex
+
+V6 thử làm mềm riêng ngưỡng lệch entry, kế thừa các điều kiện an toàn của v5.
+Không thêm migration; version mới tách thống kê khỏi các phiên bản trước.
+
+- `entry_drift` là khuyến nghị: lệch bất lợi >0,30 ATR₀ hiển thị “Entry muộn”.
+  BUY/SELL vẫn bắt buộc báo giá ≤120 giây, xác nhận M15, H1 phù hợp nhánh,
+  lịch tin hợp lệ, ngoài cửa sổ tin, setup còn hiệu lực, cấu trúc và SL/TP đúng,
+  SL ≤5 ATR₀, R:R sau chi phí tới TP **và cản đầu tiên** ≥1,5.
+- Khoảng entry không còn cắt tại ngưỡng 0,30 ATR; chỉ mở tới giới hạn cấu trúc,
+  trần SL và R:R. Không dịch entry gốc, ATR₀, SL, TP hoặc thời hạn 30 phút.
+- Nhánh hồi và breakout–retest tiếp tục được đánh giá độc lập, cả BUY và SELL
+  theo H1 hoặc breakout khi H1 trung tính đủ dữ liệu. Không có nhánh ngược H1
+  hoặc breakout chưa retest. FE hiển thị kết quả từng nhánh tại nến đóng được ghi
+  trên kế hoạch; đây là snapshot lúc xét setup, không phải mọi nhánh đều đã đủ
+  dữ liệu/điều kiện phát tín hiệu. Dữ liệu thiếu có phần chặn riêng trên checklist.
+- Phiếu phát lần đầu lưu `entry_admission`: `late_entry` (nhận thêm nhờ nới ngưỡng)
+  hoặc `reference_band`. Phiếu cũ không có trường này là `unclassified`; không
+  suy ngược bằng giá hiện tại. Nhóm được giữ nguyên khi đánh giá lại cùng setup.
+- Lịch sử nhóm theo version, BUY/SELL, nhánh và entry_admission trong tối đa 50
+  tín hiệu đang tải. R mô phỏng dùng entry chạm giá, SL/TP và spread lúc phát;
+  mẫu TP trước: (reward−spread)/(risk+spread); SL trước: −1R. Mẫu mơ hồ/thiếu
+  dữ liệu/chưa chạm mức thoát không đóng góp R. Sụt giảm là peak-to-trough của
+  tổng R các mẫu kết thúc, xếp theo thời điểm phát; không phải equity tài khoản,
+  chưa gồm phí/trượt giá/gap. Chưa có kiểm thử ngoài mẫu để kết luận lợi nhuận.
+- Lưu ứng viên bị loại do trần SL vào `stop_cap_audit` của từng đánh giá. Chỉ gắn
+  `sole_blocker` nếu tại báo giá đó mọi điều kiện bắt buộc khác đều đạt; lịch tin
+  chưa xác minh hoặc giá cũ không thể được tính “chỉ vướng SL”. Thống kê tách số
+  lượt kiểm tra và số setup duy nhất. Chỉ gắn “chặn duy nhất” trong chu kỳ nến
+  xác nhận, vì ứng viên đã loại không có vòng đời theo dõi riêng. Phép đánh giá
+  đối chứng này không phát phiếu.
+- Cơ chế quote timestamp và cache lịch tin của v5 giữ nguyên; dữ liệu quá hạn
+  vẫn chặn. Không tăng quota nhà cung cấp hoặc thay timestamp nguồn.
+
+### Phân biệt kế hoạch và entry hiện tại
+
+- SetupEngine vẫn tìm setup bằng OHLC H1/M15 đã đóng khi endpoint `/price/XAU`
+  không có báo giá mới. Quote dùng `updatedAt` của endpoint này, không dùng giờ
+  đóng nến hay giờ nhận HTTP. Không đổi ngưỡng 120 giây.
+- `planning_action` là hướng kế hoạch theo setup đã xác nhận; `action` vẫn là
+  quyết định có đủ điều kiện phát tín hiệu tại giá hiện tại. Chỉ `action=buy/sell`
+  được lưu vào lịch sử tín hiệu, gọi AI hoặc gửi Telegram. Kế hoạch chờ quote
+  không chiếm ID phát tín hiệu; sau khi có quote được xét lại cùng setup.
+- `quote` chuyển thành cảnh báo ở bước lập kế hoạch. Check `current_entry`
+  vẫn bắt buộc có quote đủ mới. Thiếu quote: `current_entry_status=unchecked`,
+  `setup_status=awaiting_quote` nếu các dữ liệu lập kế hoạch đã sẵn sàng;
+  trạng thái dữ liệu thiếu, lịch tin hoặc setup hết hạn/vô hiệu vẫn được giữ.
+- Entry tham chiếu, timestamp nến xác nhận, SL/TP và `reference_reward_risk`
+  luôn được giữ riêng. `decision_plan.reward_risk` chỉ tính ở báo giá mới;
+  thiếu quote thì null. Không lấy giá đóng nến thay cho một kiểm tra giá hiện tại.
+- Các check phụ thuộc quote (điểm vô hiệu, mục tiêu chưa chạm, lệch entry,
+  SL/TP tại giá hiện tại, R:R) là `unknown` khi thiếu quote; cả lệch entry vốn
+  chỉ là khuyến nghị cũng không được hiện “Đạt” hay tự tính trên giá cũ.
+- Cache backend và đồng hồ FE hạ trạng thái entry khi quote hết hạn, giữ kế hoạch
+  tham chiếu, xóa R:R hiện tại và các dấu đạt phụ thuộc giá. Hết chu kỳ M15,
+  hết hạn lịch tin hoặc setup vẫn được xử lý riêng, không bị hạn quote che mất.
+- Khi có quote mới, kiểm tra lại toàn bộ điều kiện và vòng đời setup; không đổi
+  entry gốc, ATR, SL/TP, ID hay thời hạn. Không có ô nhập giá thủ công trong thay đổi này.
+
+## Nền tảng v5: zoi-v5-setup-policy
 
 V5 áp dụng phân loại của bản thử nghiệm v2 trong thiết kế; dùng version mới để
 không gộp thống kê/lịch sử với v4. Không cần thêm migration cho thay đổi này.
