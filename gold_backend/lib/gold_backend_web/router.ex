@@ -15,6 +15,7 @@ defmodule GoldBackendWeb.Router do
     pipe_through :api
 
     post "/crawl-news", TradingController, :trigger_crawl_news
+    get "/news", TradingController, :news
     get "/overview", TradingController, :overview
     get "/analyze", TradingController, :analyze_and_get_data
   end

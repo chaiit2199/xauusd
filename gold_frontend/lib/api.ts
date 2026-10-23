@@ -1,4 +1,4 @@
-import type { AnalyzeData, CrawlResponse, MarketBoard } from "./types";
+import type { AnalyzeData, Article, CrawlResponse, MarketBoard } from "./types";
 import { apiBase } from "./format";
 
 type ErrorBody = {
@@ -78,6 +78,21 @@ export async function analyzeMarket(): Promise<AnalyzeData> {
     }
 
     return body.data;
+  } catch (error) {
+    throw networkError(error);
+  }
+}
+
+export async function fetchNews(): Promise<Article[]> {
+  try {
+    const response = await fetch(`${apiBase}/api/trading/news`, {
+      headers: { Accept: "application/json" }, cache: "no-store",
+    });
+    const body = await readBody(response);
+    if (!response.ok || !Array.isArray(body.articles)) {
+      throw new Error(body.message || `HTTP ${response.status}`);
+    }
+    return body.articles;
   } catch (error) {
     throw networkError(error);
   }

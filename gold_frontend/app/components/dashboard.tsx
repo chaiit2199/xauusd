@@ -1,10 +1,10 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
-import { analyzeMarket, crawlNews, fetchOverview } from "../../lib/api";
+import { analyzeMarket, crawlNews, fetchNews, fetchOverview } from "../../lib/api";
 import { expireAnalysis } from "../../lib/analysis-window";
 import { when } from "../../lib/format";
-import type { CrawlResponse, MarketBoard } from "../../lib/types";
+import type { Article, CrawlResponse, MarketBoard } from "../../lib/types";
 import { AiReport } from "./ai-report";
 import { IndicatorGrid } from "./indicator-grid";
 import { NewsList } from "./news-list";
@@ -21,6 +21,8 @@ export function Dashboard() {
   const [loadingBoard, setLoadingBoard] = useState(true);
   const [elapsed, setElapsed] = useState(0);
   const [crawl, setCrawl] = useState<CrawlResponse | null>(null);
+  const [articles, setArticles] = useState<Article[]>([]);
+  const [newsError, setNewsError] = useState<string | null>(null);
   const [board, setBoard] = useState<MarketBoard | null>(null);
   const [insight, setInsight] = useState<string | null>(null);
   const [insightError, setInsightError] = useState<string | null>(null);
@@ -31,6 +33,21 @@ export function Dashboard() {
   const [nextIn, setNextIn] = useState<number | null>(null);
   const analyzingRef = useRef(false);
   const analyzeLock = useRef(false);
+
+  useEffect(() => {
+    let cancelled = false;
+    async function loadNews() {
+      try {
+        const data = await fetchNews();
+        if (!cancelled) { setArticles(data); setNewsError(null); }
+      } catch (error) {
+        if (!cancelled) setNewsError(error instanceof Error ? error.message : "Không tải được tin.");
+      }
+    }
+    void loadNews();
+    const id = window.setInterval(() => void loadNews(), BOARD_MS);
+    return () => { cancelled = true; window.clearInterval(id); };
+  }, []);
 
   useEffect(() => {
     analyzingRef.current = analyzing;
@@ -122,8 +139,8 @@ export function Dashboard() {
     try {
       const result = await crawlNews();
       setCrawl(result);
-      setBoard(await fetchOverview());
-      setBoardError(null);
+      setArticles(await fetchNews());
+      setNewsError(null);
     } catch (error) {
       setCrawlError(
         error instanceof Error ? error.message : "Không cập nhật được tin.",
@@ -195,6 +212,7 @@ export function Dashboard() {
 
       {boardError ? <p className="banner bad" role="alert">Chưa thể cập nhật bảng giá. {view ? "Đang hiển thị báo giá gần nhất. " : ""}{boardError}</p> : null}
       {crawlError ? <p className="banner bad" role="alert">{crawlError}</p> : null}
+      {newsError ? <p className="banner bad" role="alert">Không tải được tin. {newsError}</p> : null}
       {analyzeError ? <p className="banner bad" role="alert">{analyzeError}</p> : null}
       {crawl ? (
         <p className={crawl.status === "success" ? "banner ok" : "banner bad"}>
@@ -256,16 +274,12 @@ export function Dashboard() {
           </details>
           {view.events.length > 0 ? <EconomicEvents events={view.events} /> : null}
 
-          <div className="news-band">
-            <NewsList
-              title="Tin mới nhất · hôm nay và hôm qua (UTC)"
-              filterable
-              articles={view.news_3d}
-              empty="Chưa có tin hôm nay và hôm qua theo UTC. Chọn “Cập nhật tin” để đồng bộ."
-            />
-          </div>
         </>
       ) : null}
+      <div className="news-band">
+        <NewsList title="Tin mới nhất · hôm nay và hôm qua (UTC)" filterable articles={articles}
+          empty="Chưa có tin hôm nay và hôm qua theo UTC. Chọn “Cập nhật tin” để đồng bộ." />
+      </div>
       </main>
       <footer className="site-footer"><span>Vàng · XAUUSD</span><span>Dữ liệu & phân tích thị trường</span></footer>
     </div>

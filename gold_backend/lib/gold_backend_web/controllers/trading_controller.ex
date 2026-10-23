@@ -53,6 +53,12 @@ defmodule GoldBackendWeb.TradingController do
     })
   end
 
+  def news(conn, _params) do
+    now = DateTime.utc_now()
+    articles = news_between(two_day_start(now), now)
+    json(conn, %{status: "success", articles: Enum.map(articles, &article_json/1)})
+  end
+
   def build_context(opts \\ []), do: market_context(opts)
 
   def write_commentary(context) do
