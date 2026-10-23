@@ -1,11 +1,11 @@
 defmodule GoldBackend.Services.InsightCache do
   use GenServer
   require Logger
-  alias GoldBackend.Services.{AiDecision, CandleClock, NewsCrawler, OhlcSync, TelegramNotifier}
+  alias GoldBackend.Services.{AiDecision, CandleClock, GoldOhlc, OhlcSync, TelegramNotifier}
   alias GoldBackendWeb.TradingController
   @table __MODULE__
   def start_link(_), do: GenServer.start_link(__MODULE__, %{}, name: __MODULE__)
-  def interval_seconds, do: CandleClock.interval_seconds()
+  def interval_seconds, do: 300
 
   def fresh?(%DateTime{} = at, action, current, now \\ DateTime.utc_now()),
     do:
@@ -82,14 +82,17 @@ defmodule GoldBackend.Services.InsightCache do
   @impl true
   def handle_info(:refresh, state) do
     now = DateTime.utc_now()
-    slot = CandleClock.closed_at(now)
+    slot = CandleClock.closed_at(now, interval_seconds())
     Process.cancel_timer(state.timer)
     state = %{state | timer: schedule_refresh(now)}
 
     if state.job || state.last_slot == slot do
       {:noreply, state}
     else
-      task = Task.Supervisor.async_nolink(GoldBackend.TaskSupervisor, fn -> compute(slot) end)
+      task =
+        Task.Supervisor.async_nolink(GoldBackend.TaskSupervisor, fn ->
+          compute(slot, Map.get(state, :last_ai_candle))
+        end)
 
       timeout = AiDecision.max_duration_ms()
 
@@ -102,7 +105,7 @@ defmodule GoldBackend.Services.InsightCache do
   def handle_info({ref, {:ok, snapshot}}, %{job: %{ref: ref}} = state) do
     Process.demonitor(ref, [:flush])
 
-    if CandleClock.current?(state.job_slot, DateTime.utc_now()) do
+    if CandleClock.current?(CandleClock.closed_at(state.job_slot), DateTime.utc_now()) do
       :ets.insert(@table, {:snapshot, snapshot})
 
       Task.Supervisor.start_child(GoldBackend.TaskSupervisor, fn ->
@@ -111,6 +114,11 @@ defmodule GoldBackend.Services.InsightCache do
     else
       Logger.warning("Discarded analysis from an expired M15 candle")
     end
+
+    state =
+      if Map.get(snapshot, :ai_attempted),
+        do: Map.put(state, :last_ai_candle, snapshot.analysis_candle_closed_at),
+        else: state
 
     {:noreply, %{state | job: nil}}
   end
@@ -135,51 +143,87 @@ defmodule GoldBackend.Services.InsightCache do
   def handle_info(_, state), do: {:noreply, state}
 
   defp schedule_refresh(now),
-    do: Process.send_after(self(), :refresh, CandleClock.delay_ms(now) + 35_000)
+    do:
+      Process.send_after(
+        self(),
+        :refresh,
+        (interval_seconds() - rem(DateTime.to_unix(now), interval_seconds())) * 1000 -
+          div(elem(now.microsecond, 0), 1000) + 35_000
+      )
 
-  defp compute(slot) do
-    ohlc_feed = OhlcSync.refresh(slot)
+  defp compute(slot, last_ai_candle) do
+    candle_slot = CandleClock.closed_at(slot)
+    ohlc_feed = OhlcSync.refresh(candle_slot)
     if ohlc_feed.error, do: Logger.warning("OHLC: #{ohlc_feed.error}")
 
-    try do
-      NewsCrawler.fetch_and_save_all()
-    rescue
-      error -> Logger.warning("News refresh failed: #{Exception.message(error)}")
-    end
-
-    with {:ok, context} <-
+    with {:ok, quote} <- GoldOhlc.quote(),
+         {:ok, context} <-
            TradingController.build_context(
-             translate_timeout: 8_000,
              as_of: slot,
-             ohlc_feed: ohlc_feed
+             ohlc_feed: ohlc_feed,
+             quote: quote,
+             news_today: true
            ) do
-      {action, reason, error} =
-        case AiDecision.analyze(context) do
-          {:ok, action, reason} ->
-            {action, reason, nil}
+      rule_action = context.plan.action
+      candle = DateTime.to_iso8601(candle_slot)
 
-          {:error, error} ->
-            {:wait, "Không có quyết định AI hợp lệ; tiếp tục theo dõi.", error}
+      cond do
+        rule_action not in ["buy", "sell"] ->
+          {:ok, TradingController.rule_snapshot(context)}
 
-          _ ->
-            {:wait, "Không có quyết định AI hợp lệ; tiếp tục theo dõi.",
-             "Kết quả AI không hợp lệ."}
-        end
+        candle == last_ai_candle ->
+          {:ok, TradingController.rule_snapshot(context, "Đã xử lý tín hiệu của nến M15 này.")}
 
-      snapshot = TradingController.analysis_snapshot(context, action, reason, error)
-
-      snapshot =
-        if is_nil(snapshot.ai_error) and snapshot.cfd_plan.action != Atom.to_string(action) do
-          %{
-            snapshot
-            | ai_insight:
-                snapshot.ai_insight <> "\nĐiều kiện khóa lệnh: " <> snapshot.cfd_plan.block_reason
-          }
-        else
-          snapshot
-        end
-
-      {:ok, snapshot}
+        true ->
+          result = AiDecision.analyze(context)
+          snapshot = confirmed_snapshot(context, rule_action, result)
+          {:ok, Map.put(snapshot, :ai_attempted, true)}
+      end
     end
   end
+
+  def confirmed_snapshot(context, rule_action, result, opts \\ []) do
+    quote_fn = Keyword.get(opts, :quote, &GoldOhlc.quote/0)
+
+    case result do
+      {:ok, action, reason} when action in [:buy, :sell] ->
+        if Atom.to_string(action) == rule_action do
+          with {:ok, quote} <- quote_fn.(),
+               true <- quote_valid?(context, quote),
+               true <-
+                 CandleClock.current?(
+                   CandleClock.closed_at(context.analysis_at),
+                   DateTime.utc_now()
+                 ) do
+            TradingController.analysis_snapshot(context, action, reason, nil)
+          else
+            _ ->
+              TradingController.rule_snapshot(
+                context,
+                "Giá hoặc chu kỳ không còn hợp lệ sau khi AI phân tích."
+              )
+          end
+        else
+          TradingController.rule_snapshot(context, "AI không xác nhận cùng hướng với rule.")
+        end
+
+      {:ok, _, _} ->
+        TradingController.rule_snapshot(context, "AI chọn đứng ngoài.")
+
+      {:error, error} ->
+        TradingController.rule_snapshot(context, "AI lỗi: #{error}")
+
+      _ ->
+        TradingController.rule_snapshot(context, "Kết quả AI không hợp lệ.")
+    end
+  end
+
+  defp quote_valid?(context, %{price: price}) when is_number(price) do
+    plan = context.plan
+    # A conservative tolerance; reject stale entry and price beyond the stop.
+    abs(price - plan.entry) <= min(0.25 * context.indicators.atr_14, 1.0) and
+      if(plan.action == "buy", do: price > plan.stop_loss, else: price < plan.stop_loss)
+  end
+
+  defp quote_valid?(_, _), do: false
 end

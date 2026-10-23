@@ -28,12 +28,18 @@ defmodule GoldBackend.Services.AiDecision do
       entry_guard: Map.get(context.plan, :entry_guard),
       news_digest: context.news_bias.digest,
       events: context.events,
+      rule_action: Map.get(context.plan, :action),
+      news_status:
+        if(context.news == [],
+          do: "Chưa có dữ liệu tin tức trong ngày UTC",
+          else: "Tin tức trong ngày UTC"
+        ),
       news:
         context.news
         |> Enum.take(6)
         |> Enum.map(fn n ->
           title = if is_binary(n.title_vi) and n.title_vi != "", do: n.title_vi, else: n.title
-          %{title: title, published_at: n.published_at}
+          %{title: title, source: Map.get(n, :source), published_at: n.published_at}
         end)
     }
 

@@ -87,7 +87,7 @@ defmodule GoldBackendWeb.TradingController do
         |> put_status(503)
         |> json(%{
           status: "pending",
-          message: "Đang chờ phiên phân tích M15 đầu tiên tại mốc :00, :15, :30 hoặc :45."
+          message: "Đang chờ lần kiểm tra tiếp theo sau mỗi 5 phút."
         })
 
       data ->
@@ -95,7 +95,35 @@ defmodule GoldBackendWeb.TradingController do
     end
   end
 
+  def rule_snapshot(context, reason \\ nil) do
+    rule_action = context.plan.action
+    reason = reason || context.plan.block_reason || "Chưa có tín hiệu đủ điều kiện."
+
+    plan =
+      Map.merge(context.plan, %{
+        action: "wait",
+        action_label: "Đứng ngoài",
+        block_reason: reason,
+        summary: reason
+      })
+
+    context = %{context | plan: plan}
+
+    Map.merge(public_snapshot(context), %{
+      rule_action: rule_action,
+      ai_action: nil,
+      ai_insight: nil,
+      ai_error: nil,
+      ai_cached_at: DateTime.utc_now() |> DateTime.truncate(:second) |> DateTime.to_iso8601(),
+      ai_ttl_seconds: InsightCache.interval_seconds(),
+      analysis_candle_closed_at: DateTime.to_iso8601(CandleClock.closed_at(context.analysis_at)),
+      ai_next_analysis_at: DateTime.to_iso8601(CandleClock.next_close(context.analysis_at))
+    })
+  end
+
   def analysis_snapshot(context, action, insight, error) do
+    rule_action = context.plan.action
+
     {action, insight, error} =
       if is_nil(error) do
         case AiDecision.parse(%{"action" => to_string(action), "reason" => insight}) do
@@ -120,6 +148,7 @@ defmodule GoldBackendWeb.TradingController do
     context = %{context | plan: plan}
 
     Map.merge(public_snapshot(context), %{
+      rule_action: rule_action,
       ai_action: if(is_nil(error), do: Atom.to_string(action), else: nil),
       ai_insight: insight,
       ai_error: error,
@@ -127,7 +156,7 @@ defmodule GoldBackendWeb.TradingController do
       ai_ttl_seconds: InsightCache.interval_seconds(),
       analysis_candle_closed_at:
         DateTime.to_iso8601(
-          Map.get(context, :analysis_at, CandleClock.closed_at(DateTime.utc_now()))
+          CandleClock.closed_at(Map.get(context, :analysis_at, DateTime.utc_now()))
         ),
       ai_next_analysis_at:
         DateTime.to_iso8601(
@@ -137,7 +166,7 @@ defmodule GoldBackendWeb.TradingController do
   end
 
   defp market_context(opts) do
-    now = Keyword.get(opts, :as_of, DateTime.utc_now()) |> CandleClock.closed_at()
+    now = Keyword.get(opts, :as_of, DateTime.utc_now())
     m15 = Keyword.get_lazy(opts, :m15_candles, fn -> CandleStore.load(900, now) end)
     h1 = Keyword.get_lazy(opts, :h1_candles, fn -> CandleStore.load(3600, now) end)
     ohlc = OhlcContext.build(m15, h1, now)
@@ -165,10 +194,30 @@ defmodule GoldBackendWeb.TradingController do
       {:error, feed.error || "Đang tích lũy OHLC M15/H1 từ Gold API."}
     else
       news =
-        news_since(DateTime.add(now, -3, :day))
-        |> NewsTranslator.ensure_vietnamese(timeout: Keyword.get(opts, :translate_timeout, 8_000))
+        if Keyword.get(opts, :news_today, false) do
+          start = now |> DateTime.to_date() |> DateTime.new!(~T[00:00:00], "Etc/UTC")
+          news_between(start, now)
+        else
+          news_since(DateTime.add(now, -3, :day))
+          |> NewsTranslator.ensure_vietnamese(
+            timeout: Keyword.get(opts, :translate_timeout, 8_000)
+          )
+        end
 
-      latest = Enum.max_by(prices, & &1.timestamp, DateTime)
+      latest =
+        case Keyword.get(opts, :quote) do
+          %{price: price, timestamp: timestamp} ->
+            %{
+              price: Decimal.from_float(price * 1.0),
+              timestamp: timestamp,
+              currency: "USD",
+              origin: "gold_api"
+            }
+
+          _ ->
+            Enum.max_by(prices, & &1.timestamp, DateTime)
+        end
+
       live_h1 = Enum.filter(closed_h1, &(&1.origin in ["gold_api_ohlc" | @live_origins]))
 
       summary =
@@ -295,6 +344,14 @@ defmodule GoldBackendWeb.TradingController do
     GoldPrice
     |> where([price], price.timestamp >= ^from)
     |> order_by(desc: :timestamp)
+    |> Repo.all()
+  end
+
+  defp news_between(from, now) do
+    NewsArticle
+    |> where([article], article.published_at >= ^from and article.published_at <= ^now)
+    |> order_by(desc: :published_at)
+    |> limit(15)
     |> Repo.all()
   end
 

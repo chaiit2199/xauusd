@@ -24,8 +24,8 @@ defmodule GoldBackend.Services.InsightCacheTest do
     refute InsightCache.fresh?(cached_at, "wait", "sell", now)
   end
 
-  test "interval is fifteen minutes aligned to UTC including day rollover" do
-    assert InsightCache.interval_seconds() == 900
+  test "checks run every five minutes while candle clock remains M15" do
+    assert InsightCache.interval_seconds() == 300
     assert CandleClock.next_close(~U[2026-10-21 13:07:00Z]) == ~U[2026-10-21 13:15:00Z]
     assert CandleClock.next_close(~U[2026-10-21 23:59:59Z]) == ~U[2026-10-22 00:00:00Z]
     assert CandleClock.delay_ms(~U[2026-10-21 13:14:59.500Z]) == 500
@@ -75,7 +75,7 @@ defmodule GoldBackend.Services.InsightCacheTest do
       state = %{
         job: job,
         job_slot: nil,
-        last_slot: CandleClock.closed_at(DateTime.utc_now()),
+        last_slot: CandleClock.closed_at(DateTime.utc_now(), 300),
         timer: timer
       }
 
@@ -97,7 +97,7 @@ defmodule GoldBackend.Services.InsightCacheTest do
                ai_insight: nil,
                ai_error: nil,
                ai_cached_at: nil,
-               ai_ttl_seconds: 900
+               ai_ttl_seconds: 300
              }
     after
       :sys.resume(pid)

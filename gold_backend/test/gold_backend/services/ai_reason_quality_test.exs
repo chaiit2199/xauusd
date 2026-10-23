@@ -1,7 +1,7 @@
 defmodule GoldBackend.Services.AiReasonQualityTest do
   use ExUnit.Case, async: true
 
-  alias GoldBackend.Services.{AiDecision, TelegramNotifier, TradePlan}
+  alias GoldBackend.Services.{AiDecision, InsightCache, TelegramNotifier, TradePlan}
   alias GoldBackendWeb.TradingController
 
   @reported "Tù trending H1 với giá 4078.7 và chỉ báo principal, diagonal và positive technical indicators, diagonal positive technical indicators. Ví dụ, diagonal positive technical indicators, principal technical indicator, diagonal positive technical indicators, principal technical indicator, diagonal positive technical indicators, principal technical ind..."
@@ -89,6 +89,30 @@ defmodule GoldBackend.Services.AiReasonQualityTest do
              TelegramNotifier.notify(snapshot,
                http_post: fn _, _, _, _ -> flunk("must not send blocked sell") end
              )
+  end
+
+  test "opposing AI decisions are blocked without fetching another quote" do
+    context = Map.put(context(), :analysis_at, DateTime.utc_now())
+
+    snapshot =
+      InsightCache.confirmed_snapshot(context, "sell", {:ok, :buy, @valid},
+        quote: fn -> flunk("must not request quote") end
+      )
+
+    assert snapshot.cfd_plan.action == "wait"
+    assert snapshot.cfd_plan.block_reason =~ "không xác nhận"
+  end
+
+  test "an expired entry is blocked after AI agrees" do
+    context = Map.put(context(), :analysis_at, DateTime.utc_now())
+
+    snapshot =
+      InsightCache.confirmed_snapshot(context, "sell", {:ok, :sell, @valid},
+        quote: fn -> {:ok, %{price: 4100.0}} end
+      )
+
+    assert snapshot.cfd_plan.action == "wait"
+    assert snapshot.cfd_plan.block_reason =~ "không còn hợp lệ"
   end
 
   defp context do
