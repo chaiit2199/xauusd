@@ -25,6 +25,20 @@ export type CfdPlan = {
   lean: "buy" | "sell" | "neutral";
   bias?: { side: "buy" | "sell" | "neutral"; reason: string; adx: number | null; slope: number | null; locked_until: string | null };
   setup_label?: string;
+  strategy_version?: string;
+  mode?: "signals_only";
+  setup_id?: string | null;
+  setup_status?: "watching" | "wait_confirmation" | "wait_pullback" | "wait_target" | "signal_ready" | "expired" | "invalidated" | "paused" | "news_window";
+  decision_plan?: DecisionPlan;
+  setup_formed_at?: string | null;
+  setup_expires_at?: string | null;
+  reference_entry?: number | null;
+  reference_atr?: number | null;
+  entry_adverse?: number | null;
+  entry_limit?: number | null;
+  barrier?: { id: string; low: number; mid: number; high: number } | null;
+  execution_status?: "not_tracked";
+  execution_ready?: boolean;
   blocking_reasons?: string[];
   checks?: { code: string; status: "pass" | "blocked" | "unknown"; reason: string }[];
   soft_flags?: string[];
@@ -111,6 +125,9 @@ export type M15Setup = {
 };
 
 export type MarketBoard = {
+  signal_valid_until?: string | null;
+  next_evaluation_at?: string;
+  rule_statistics?: RuleStatistics;
   current_price: string;
   currency: string;
   price_origin: string;
@@ -152,6 +169,66 @@ export type MarketBoard = {
   ai_error?: string | null;
   ai_cached_at?: string | null;
   ai_ttl_seconds?: number;
+};
+
+export type RuleStatistics = {
+  version: string;
+  days: number;
+  evaluations: number;
+  checks: { code: string; evaluated: number; pass: number; blocked: number; unknown: number; sole_blocker: number }[];
+};
+
+export type DecisionPlan = {
+  side: "buy" | "sell" | "neutral";
+  source: string;
+  evidence: string[];
+  candidate_count?: number;
+  cost_sensitivity?: { stress_cost: number; stress_reward_risk: number; max_cost_for_min_rr: number } | null;
+  supporting_evidence?: { code: string; supports: boolean; reason: string }[];
+  technical_context?: {
+    as_of: string;
+    ribbon: { side: string; values: { period: number; value: number }[] };
+    structure: { side: string; high: StructurePivot | null; low: StructurePivot | null };
+    fibonacci: { side: string; high: StructurePivot; low: StructurePivot; levels: { ratio: number; price: number }[] } | null;
+    aoi: { id: string; low: number; high: number }[];
+    rolling_4h: { high: number; low: number } | null;
+    rolling_24h: { high: number; low: number } | null;
+  } | null;
+  entry_zone: { low: number; high: number } | null;
+  entry_zone_kind: "eligible" | "watch";
+  confirmation: string;
+  trigger: string;
+  stop_loss: number | null;
+  stop_reason: string;
+  take_profit: number | null;
+  target_reason: string;
+  reward_risk: number | null;
+  reward_risk_basis: string;
+  cost: { spread: number; source: string; description: string };
+  formed_at: string | null;
+  expires_at: string | null;
+  cancellation: string[];
+  simulation_seconds: number;
+};
+
+type StructurePivot = { price: number; label: string; pivot_at: string; confirmed_at: string };
+
+export type SignalHistoryData = {
+  model: string;
+  limit: number;
+  summary: Record<string, number>;
+  items: {
+    setup_id: string;
+    side: "buy" | "sell";
+    version: string;
+    published_at: string;
+    expires_at: string | null;
+    horizon_at: string | null;
+    validity: "active" | "expired" | "invalidated" | "unknown";
+    validity_reason: string | null;
+    plan: DecisionPlan | null;
+    result: { status: string; entry_touched: boolean; entry_price?: number | null; entry_bar_at?: string | null; exit_bar_at?: string | null; observed_from?: string; observed_through?: string | null; detail?: string };
+  }[];
 };
 
 export type AnalyzeData = MarketBoard & {

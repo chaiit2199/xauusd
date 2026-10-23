@@ -50,12 +50,128 @@ Nội dung lặp bị từ chối ngay, không đem dịch vì không có lập 
 bản dịch cũng phải qua kiểm tra chất lượng và giữ nguyên action. Các ngưỡng này
 là kiểm tra hình thức, không chứng minh nhận định đúng về ngữ nghĩa hoặc số liệu.
 
-Snapshot kiểm tra lại nhận định trước khi công bố. Khi không hợp lệ, kết quả là
-`wait`, `ai_action: null`, kèm `ai_error`; không dùng đoạn lỗi làm lý do giao dịch.
-Telegram kiểm tra lại toàn bộ nhận định trước khi rút gọn và gửi, kể cả khi
-snapshot mang action Buy/Sell và chưa có `ai_error`. Không thay model hay temperature.
+Snapshot kiểm tra lại bình luận trước khi hiển thị. Khi không hợp lệ,
+`ai_action: null` kèm `ai_error`; quyết định theo rule không bị AI thay đổi.
+Telegram kiểm tra bình luận trước khi sử dụng; nếu chưa có bình luận hợp lệ,
+thông báo dùng lý do từ rule. Không thay model hay temperature.
 
-## Quy tắc điểm vào: không bán đáy, không mua đỉnh
+## Bộ tín hiệu hiện hành: zoi-v4-confluence
+
+V4 mở rộng cách tìm setup, không cộng mọi chỉ báo thành điều kiện chặn:
+
+- Duyệt tất cả vùng chạm có xác nhận. Ưu tiên setup đạt cấu trúc/R:R tại giá xác nhận,
+  rồi setup có khoảng entry khả thi, sau đó mới tới setup đang thiếu điều kiện.
+  Trong cùng nhóm, ưu tiên R:R sau spread giả định, số nhóm bằng chứng hỗ trợ, rồi ID
+  để kết quả không phụ thuộc thứ tự vùng. Đây không phải tối ưu lợi nhuận đã kiểm chứng.
+- Bốn xác nhận thay thế nhau: pinbar, engulfing, sweep–reclaim, phá vỡ–retest.
+  Retest yêu cầu thân nến trước đóng qua mép ngoài vùng đã tồn tại trước nó;
+  nến sau chạm lại vùng, giữ mép vô hiệu và đóng cùng hướng bên ngoài vùng.
+  Vùng kháng cự chỉ đổi thành vùng BUY qua retest này; hỗ trợ đổi thành SELL đối xứng.
+- ATR của OHLC dùng Wilder RMA14, khởi tạo bằng trung bình 14 true range đầu;
+  nến đầu dùng high−low. ATR của nhánh quote cũ vẫn chỉ là xấp xỉ.
+- EMA20/25/30/35/40/45/50/55 là **một nhóm** bằng chứng, cần 55 nến; seed SMA
+  của N nến đầu. Không thêm tám phiếu đồng thuận hay suy diễn xác suất thắng.
+- Cấu trúc H1 dùng pivot hai nến mỗi phía, ghi riêng `pivot_at`/`confirmed_at`,
+  HH/HL/LH/LL (bằng nhau là EH/EL). Phá bằng giá đóng tạo Break đầu tiên, BoS cùng
+  hướng hoặc CHoCH ngược hướng; mỗi mức chỉ phát một lần cho tới mức pivot khác.
+- Fibonacci 0,236/0,382/0,5/0,618/0,786 từ cặp đỉnh/đáy gần nhất đã xác nhận,
+  lưu cả hai điểm neo. Trùng vùng entry là bằng chứng bổ sung, không phủ quyết.
+- AOI từ cực trị thân 50 nến H1 ± ATR14, chỉ thêm **vùng entry chờ phản ứng**.
+  Không biến AOI/Fibonacci/EMA ribbon thành hàng loạt vùng cản TP mới.
+  Đỉnh/đáy rolling 4/24 giờ chỉ hiển thị khi đủ cửa sổ nến đã đóng liên tục.
+- Bối cảnh được tính trước nến trigger và lưu cùng setup. Không lấy pivot tương lai,
+  không giả lập volume thiếu, không cam kết khớp chỉ báo TradingView/Mxwll.
+  Các chỉ báo hỗ trợ không thay thế hướng H1 hay các kiểm tra bắt buộc hiện hành.
+- Phần R:R thêm kịch bản chi phí bằng hai lần spread để xem độ nhạy, không thêm
+  ngưỡng chặn. Chi phí này không phải spread broker, phí hay trượt giá quan sát được.
+
+V3 và kết quả mô phỏng cũ giữ nguyên; v4 có ID/version riêng để đối chiếu về sau.
+Giao diện bỏ mục “Phạm vi và nguồn dữ liệu” và cảnh báo headline chung; lịch tin
+USD High và kiểm tra độ mới dữ liệu vẫn hoạt động. Chi phí giả định vẫn ghi bên R:R.
+
+Kế hoạch công khai có hướng, bằng chứng H1/M15, vùng entry, điều kiện xác nhận,
+SL và lý do vô hiệu, TP kèm vùng cản, R:R, nguồn giá, chi phí và thời hạn.
+Vùng theo dõi trước xác nhận được phân biệt với khoảng entry đủ điều kiện sau xác nhận.
+Khoảng entry sau xác nhận là giao của các điều kiện cấu trúc, độ lệch 0,30 ATR,
+SL ≤ 5 ATR và R:R sau chi phí ≥ 1,5; hai biên làm tròn vào trong tới 0,01 USD.
+RSI/Stochastic vẫn không có quyền phủ quyết độc lập. Lý do H1 nêu rõ giá/SMA20,
+MACD, ADX và độ dốc, hoặc lý do chưa có hướng.
+
+TP dùng mép gần vùng cản H1 đã biết trước trigger, không thay bằng một mục tiêu 2R
+khi thiếu cản. Khi chưa xác định TP, trạng thái là chờ mục tiêu, chưa phát tín hiệu.
+Chi phí giả định được ghi ngay tại phần R:R của kế hoạch; số spread giả định
+vẫn không xuất hiện như một báo giá trực tiếp trong phần tổng quan thị trường.
+
+### Lịch sử mô phỏng chạm giá
+
+`GET /api/trading/signals` trả 50 tín hiệu mới nhất, kế hoạch nguyên bản và kết quả
+được lưu trong `signal_outcomes`. Tín hiệu v2 vẫn được giữ nhưng không được tự
+backfill thành mô phỏng v3. Cửa sổ entry kết thúc cùng thời hạn setup; cửa sổ
+theo dõi TP/SL cố định là **hai giờ từ lúc phát**. Mô hình `m15-touch-v1`:
+
+- Chỉ dùng nến Gold API M15 đã đóng và trọn vẹn sau lúc phát. Bỏ qua phần nến
+  chứa thời điểm phát và phần nến cuối vượt cửa sổ; giao diện ghi rõ giới hạn này.
+- Entry được ghi nhận khi phạm vi nến chạm vùng entry. Giá mô phỏng là Open nếu
+  Open nằm trong vùng, hoặc mép đầu tiên của vùng từ phía Open. Đây không phải fill.
+- Sau entry, ghi TP trước, SL trước hoặc chưa chạm cả hai trong thời hạn. Không tính
+  P&L, tỷ lệ thắng giao dịch thực, phí thực hay lợi nhuận của tài khoản.
+- Cùng nến chạm cả hai mức thoát, hoặc entry nội nến và mức thoát cùng được chạm,
+  ghi không xác định thứ tự. Không tự chọn TP để làm đẹp kết quả.
+- Gap mở cửa vượt SL trước entry không được coi là khớp. Hủy giữa nến cần chờ
+  nến đóng; nếu không biết entry trước hay sau hủy thì ghi không xác định.
+- Thiếu, trùng hoặc nến không hợp lệ: chưa kết luận; thử lại trong bảy ngày.
+  Kết quả đã kết thúc được giữ cố định. Việc restart không xóa kế hoạch hoặc kết quả.
+- Hiệu lực active/expired/invalidated tách biệt với kết quả mô phỏng; hết hạn entry
+  không kết thúc sớm việc quan sát một entry đã chạm trong mô hình.
+
+Chạy migration `20261024000200_create_signal_outcomes` cùng các migration còn lại
+trước khi khởi động mã mới. Kiểm thử: `signal_simulator_test`, `signal_history_test`,
+`decision_plan_test` và các kiểm thử pipeline/expiry. Đây là đánh giá chạm giá
+theo quy tắc đã công bố, chưa phải backtest thực thi broker.
+
+### Các kiểm soát chung của luồng tín hiệu
+
+Dashboard chạy `BiasEngine → SetupLifecycle/SetupRegistry → StrategyPlan → DecisionJournal`.
+`EntryRules` và `M15Signal` bên dưới là nhánh cũ, không quyết định tín hiệu của luồng này.
+Phiên bản mới là cấu hình thử nghiệm, chưa có kết quả backtest hoặc chứng minh lợi nhuận.
+
+- Chỉ phát tín hiệu; không đặt lệnh, theo dõi vị thế hay suy diễn giao dịch đã khớp.
+  Không áp dụng quota ba lệnh, một vị thế hoặc ngân sách lỗ khi chưa có dữ liệu tài khoản.
+- RSI/Stochastic cực đoan là cảnh báo; H1, vùng giá và xác nhận M15 vẫn bắt buộc.
+- Lệch bất lợi tối đa `0,30 × ATR M15` lúc xác nhận, không có trần 1 USD.
+  BUY đo `max(0, giá hiện tại − giá tham chiếu)`, SELL đo ngược lại. Cả hai là giá
+  tham chiếu Gold API, không trộn với bid/ask broker. Giá tốt hơn vẫn phải giữ cấu trúc.
+- Giữ SL ≤ 5 ATR và R:R sau chi phí ước tính ≥ 1,5. Tính lại ở báo giá cuối cùng
+  trước khi phát tín hiệu, không kéo SL/TP để làm đẹp R:R. Spread giả định được giữ
+  trong phép tính và ghi bên R:R, không hiện như spread trực tiếp; `execution_ready` luôn false ở chế độ này.
+- Vùng cản dùng đỉnh/đáy ngày trước đầy đủ và swing H1 có hai nến xác nhận mỗi phía,
+  đã biết trước nến trigger. TP đặt tại mép gần của vùng cản; đánh giá riêng
+  khoảng trống tới cản. Phá vỡ chỉ được xét sau retest như quy tắc v4 ở trên.
+- Mã setup gồm phiên bản, hướng, định danh vùng và thời điểm xác nhận. Lưu cố định
+  giá tham chiếu, ATR, vùng, SL/TP ở lần quan sát đầu. Setup hết hạn sau hai nến M15,
+  hoặc vô hiệu khi phá cấu trúc, chạm TP, đổi hướng H1 hay đi qua cửa sổ tin đỏ.
+- Giữ cửa sổ tin USD High: 15 phút trước / 30 phút sau. Sau tin cần xác nhận mới.
+  Lịch tải lỗi là `unknown`, không được xem là không có sự kiện.
+- Mỗi phút kiểm tra lại dữ liệu và entry; không nới ngưỡng báo giá 120 giây.
+  API và trình duyệt tự chuyển sang chờ khi giá quá hạn hoặc sang nến M15 mới.
+  Lỗi lấy giá vẫn cho phép cập nhật bảng điều kiện theo dữ liệu đã lưu.
+- Bỏ quota một phiếu mỗi phiên. `strategy_signals.setup_id` chống phát lại cùng
+  setup, bao gồm qua restart; nhật ký vô hiệu ngăn setup cũ sống lại khi giá hồi.
+  AI được gọi một lần lúc phát tín hiệu mới và chỉ bổ sung bình luận.
+
+Giao diện tách hướng H1, trạng thái setup và thực thi; có trạng thái chờ xác nhận,
+chờ hồi, đủ điều kiện phát tín hiệu, hết hạn, vô hiệu, tạm dừng và cửa sổ tin.
+Bảng thống kê bảy ngày đếm từng lần đánh giá theo phút: đạt, chặn, chưa xác định,
+và chặn duy nhất khi mọi điều kiện còn lại đều đạt. Có thể đọc cùng số liệu bằng
+`mix gold.decisions`. Không coi số tín hiệu hoặc số lần chặn là số lệnh khớp hay lợi nhuận.
+
+Chạy migration trước khi khởi động bản mới: `mix ecto.migrate` (hoặc migration
+của release trong quy trình deploy). Các bảng v1 được giữ nguyên làm dữ liệu đối chiếu;
+v2 thêm `strategy_setups`, `strategy_signals`, `strategy_evaluations`, `strategy_invalidations`.
+Kiểm tra bằng `mix test`, và `npm test`, `npm run build` trong frontend. Chưa triển khai
+broker, backtest khớp lệnh, spread lịch sử, trượt giá, ngân sách tài khoản hay quản lý SL sau khớp.
+
+## Nhánh cũ: quy tắc điểm vào EntryRules
 
 `EntryRules` là lớp kiểm soát bằng mã, áp dụng cả với action từ AI và tín hiệu
 kỹ thuật. Khi vi phạm, `cfd_plan.action` là `wait`; `entry_guard.reasons` giải
@@ -240,4 +356,4 @@ docker exec xauusd-api-1 /app/bin/gold_backend rpc \
 Lệnh này vẫn thực hiện các bước chuẩn bị dữ liệu/dịch tiêu đề thường lệ. Kết quả
 thành công là `{:ok, action, "nhận định tiếng Việt..."}`; `action` có thể là
 `:buy`, `:sell` hoặc `:wait`. `Tin tức xung đột` chỉ là nhãn phân loại tin tức, không phải lỗi
-tiếng Việt. Telegram chỉ gửi Buy/Sell cuối cùng, không gửi khi chờ hoặc AI lỗi.
+tiếng Việt. Telegram chỉ gửi tín hiệu Buy/Sell mới theo rule, không gửi khi chờ.

@@ -5,7 +5,8 @@ defmodule GoldBackend.Services.Indicators do
   The database stores sampled quotes. The default aggregation is hourly;
   M15Signal passes confirmed M15 closes with a 900-second aggregation.
   ATR uses the average absolute hourly close-to-close move because the table
-  does not store high/low.
+  does not store high/low. The provider OHLC path in summarize_candles/2 instead
+  uses real true ranges with Wilder RMA14 and high/low-based Stochastic.
   """
 
   def calculate_10_indicators(prices) when is_list(prices) and length(prices) > 0 do
@@ -28,16 +29,7 @@ defmodule GoldBackend.Services.Indicators do
     ticks = Enum.map(bars, &%{timestamp: &1.open_time, price: Decimal.from_float(&1.close * 1.0)})
     summary = summarize(ticks, seconds)
 
-    ranges =
-      bars
-      |> Enum.chunk_every(2, 1, :discard)
-      |> Enum.take(-14)
-      |> Enum.map(fn [a, b] ->
-        max(b.high - b.low, max(abs(b.high - a.close), abs(b.low - a.close)))
-      end)
-
-    atr =
-      if ranges == [], do: hd(bars).high - hd(bars).low, else: Enum.sum(ranges) / length(ranges)
+    atr = candle_atr(bars)
 
     recent = Enum.take(bars, -14)
     high = recent |> Enum.map(& &1.high) |> Enum.max()
@@ -173,7 +165,7 @@ defmodule GoldBackend.Services.Indicators do
     Enum.sum(sample) / length(sample)
   end
 
-  defp ema(list, period) do
+  def ema(list, period) do
     k = 2 / (period + 1)
     seed_len = min(period, length(list))
     {seed, rest} = Enum.split(list, seed_len)
@@ -181,6 +173,23 @@ defmodule GoldBackend.Services.Indicators do
 
     Enum.reduce(rest, seed_avg, fn price, acc ->
       price * k + acc * (1 - k)
+    end)
+  end
+
+  # Wilder ATR: seed with 14 true ranges, then RMA. The first uses high-low.
+  def candle_atr(bars, period \\ 14) do
+    ranges =
+      [
+        hd(bars).high - hd(bars).low
+        | Enum.map(Enum.chunk_every(bars, 2, 1, :discard), fn [a, b] ->
+            max(b.high - b.low, max(abs(b.high - a.close), abs(b.low - a.close)))
+          end)
+      ]
+
+    {seed, rest} = Enum.split(ranges, period)
+
+    Enum.reduce(rest, Enum.sum(seed) / length(seed), fn tr, atr ->
+      (atr * (period - 1) + tr) / period
     end)
   end
 

@@ -14,7 +14,7 @@ defmodule GoldBackend.Services.InsightCache do
   alias GoldBackendWeb.TradingController
   @table __MODULE__
   def start_link(opts), do: GenServer.start_link(__MODULE__, opts, name: __MODULE__)
-  def interval_seconds, do: 300
+  def interval_seconds, do: 60
 
   def fresh?(%DateTime{} = at, action, current, now \\ DateTime.utc_now()),
     do:
@@ -48,7 +48,39 @@ defmodule GoldBackend.Services.InsightCache do
 
   def resolve(_), do: peek()
 
-  def expire_snapshot(%{ai_next_analysis_at: expiry} = data, now) do
+  def expire_snapshot(data, now) do
+    expiry = get_in(data, [:cfd_plan, :setup_expires_at])
+
+    case if(is_binary(expiry), do: DateTime.from_iso8601(expiry), else: :none) do
+      {:ok, at, _} ->
+        if DateTime.compare(now, at) != :lt,
+          do: invalidate(data, "Setup đã hết hạn; chờ xác nhận mới.", "expired"),
+          else: expire_quote(data, now)
+
+      _ ->
+        expire_quote(data, now)
+    end
+  end
+
+  defp expire_quote(data, now) do
+    case Map.get(data, :signal_valid_until) do
+      value when is_binary(value) ->
+        case DateTime.from_iso8601(value) do
+          {:ok, at, _} ->
+            if DateTime.compare(now, at) != :lt,
+              do: invalidate(data, "Báo giá đã quá hạn; chờ kiểm tra giá mới."),
+              else: expire_analysis(data, now)
+
+          _ ->
+            invalidate(data, "Thời hạn báo giá không hợp lệ.")
+        end
+
+      _ ->
+        expire_analysis(data, now)
+    end
+  end
+
+  defp expire_analysis(%{ai_next_analysis_at: expiry} = data, now) do
     case if(is_binary(expiry), do: DateTime.from_iso8601(expiry), else: :invalid) do
       {:ok, at, _} ->
         if DateTime.compare(now, at) != :lt do
@@ -64,10 +96,11 @@ defmodule GoldBackend.Services.InsightCache do
     end
   end
 
-  def expire_snapshot(data, _now), do: data
+  defp expire_analysis(data, _now), do: data
 
-  defp invalidate(data, reason) do
+  defp invalidate(data, reason, state \\ "paused") do
     Map.merge(data, %{
+      rule_action: "wait",
       ai_action: nil,
       ai_insight: nil,
       ai_error: reason,
@@ -76,6 +109,12 @@ defmodule GoldBackend.Services.InsightCache do
         Map.merge(data.cfd_plan, %{
           action: "wait",
           action_label: "Đứng ngoài",
+          setup_status:
+            if(Map.get(data.cfd_plan, :setup_status) in ["invalidated", "expired"],
+              do: data.cfd_plan.setup_status,
+              else: state
+            ),
+          execution_ready: false,
           block_reason: reason,
           summary: reason
         })
@@ -113,7 +152,7 @@ defmodule GoldBackend.Services.InsightCache do
       error -> Logger.warning("Could not restore market snapshot: #{Exception.message(error)}")
     end
 
-    # Do not wait for the next five-minute boundary after a restart.
+    # Do not wait for the next evaluation after a restart.
     send(self(), :refresh)
     {:noreply, state}
   end
@@ -148,7 +187,9 @@ defmodule GoldBackend.Services.InsightCache do
         case :ets.lookup(@table, :snapshot) do
           [{:snapshot, old}] ->
             if old.analysis_candle_closed_at == snapshot.analysis_candle_closed_at and
-                 old.cfd_plan.action == snapshot.cfd_plan.action do
+                 old.cfd_plan.action == snapshot.cfd_plan.action and
+                 Map.get(old.cfd_plan, :setup_id) == Map.get(snapshot.cfd_plan, :setup_id) and
+                 Map.get(old.cfd_plan, :entry) == Map.get(snapshot.cfd_plan, :entry) do
               Map.merge(snapshot, Map.take(old, [:ai_insight, :ai_action, :ai_error, :ai_status]))
             else
               snapshot
@@ -171,7 +212,8 @@ defmodule GoldBackend.Services.InsightCache do
 
           GenServer.cast(
             __MODULE__,
-            {:commentary, snapshot.analysis_candle_closed_at, snapshot.cfd_plan.action, result}
+            {:commentary, snapshot.analysis_candle_closed_at, snapshot.cfd_plan.action, result,
+             snapshot.cfd_plan.setup_id, snapshot.cfd_plan.entry}
           )
         end)
       end
@@ -213,62 +255,31 @@ defmodule GoldBackend.Services.InsightCache do
   defp compute(slot) do
     ohlc_feed = OhlcSync.refresh(slot)
     if ohlc_feed.error, do: Logger.warning("OHLC: #{ohlc_feed.error}")
+    GoldBackend.Services.SignalHistory.refresh()
 
-    with {:ok, quote} <- GoldOhlc.quote(),
-         {:ok, context} <-
+    quote =
+      case GoldOhlc.quote() do
+        {:ok, value} -> value
+        _ -> nil
+      end
+
+    with {:ok, context} <-
            TradingController.build_context(
              as_of: DateTime.utc_now(),
              ohlc_feed: ohlc_feed,
              quote: quote,
              news_two_days: true
-           ),
-         {:ok, current_quote} <- GoldOhlc.quote() do
-      context =
-        if context.plan.action in ["buy", "sell"] and not quote_valid?(context, current_quote) do
-          reason = "Giá thay đổi trong lúc phân tích; chờ chu kỳ tiếp theo."
-          check = %{code: "publication_quote", status: "blocked", reason: reason}
-
-          plan =
-            Map.merge(context.plan, %{
-              action: "wait",
-              action_label: "Đứng ngoài",
-              block_reason: reason,
-              summary: reason,
-              rule_commentary: reason,
-              checks: context.plan.checks ++ [check],
-              blocking_reasons: context.plan.blocking_reasons ++ [reason]
-            })
-
-          %{context | plan: plan}
-        else
-          context
+           ) do
+      current_quote =
+        case GoldOhlc.quote() do
+          {:ok, value} -> value
+          _ -> nil
         end
 
-      publication_now = DateTime.utc_now()
-      event = GoldBackend.Services.EconomicCalendar.blocking(context.events, publication_now)
-      vn_hour = DateTime.add(publication_now, 7 * 3600).hour
-
       context =
-        if context.plan.action in ["buy", "sell"] and
-             (not is_nil(event) or vn_hour < 14 or vn_hour >= 22) do
-          reason = "Cửa sổ tin hoặc phiên giao dịch đã thay đổi trước khi phát phiếu."
-          check = %{code: "publication_window", status: "blocked", reason: reason}
+        GoldBackend.Services.StrategyPlan.revalidate(context, current_quote, DateTime.utc_now())
 
-          plan =
-            Map.merge(context.plan, %{
-              action: "wait",
-              action_label: "Đứng ngoài",
-              block_reason: reason,
-              summary: reason,
-              rule_commentary: reason,
-              checks: context.plan.checks ++ [check],
-              blocking_reasons: context.plan.blocking_reasons ++ [reason]
-            })
-
-          %{context | plan: plan}
-        else
-          context
-        end
+      GoldBackend.Services.SignalHistory.reconcile(context)
 
       if CandleClock.closed_at(slot) == CandleClock.closed_at(context.analysis_at) and
            CandleClock.current?(CandleClock.closed_at(context.analysis_at), DateTime.utc_now()) do
@@ -278,7 +289,7 @@ defmodule GoldBackend.Services.InsightCache do
               "trade_checks " <>
                 Jason.encode!(%{
                   candle: CandleClock.closed_at(context.analysis_at),
-                  version: "zoi-v1",
+                  version: context.plan.strategy_version,
                   action: context.plan.action,
                   checks: context.plan.checks
                 })
@@ -308,6 +319,18 @@ defmodule GoldBackend.Services.InsightCache do
   end
 
   @impl true
+  def handle_cast({:commentary, candle, action, result, setup_id, entry}, state) do
+    case :ets.lookup(@table, :snapshot) do
+      [{:snapshot, snapshot}] ->
+        if Map.get(snapshot.cfd_plan, :setup_id) == setup_id and snapshot.cfd_plan.entry == entry,
+          do: handle_cast({:commentary, candle, action, result}, state),
+          else: {:noreply, state}
+
+      _ ->
+        {:noreply, state}
+    end
+  end
+
   def handle_cast({:commentary, candle, action, result}, state) do
     case :ets.lookup(@table, :snapshot) do
       [{:snapshot, snapshot}] ->
@@ -361,17 +384,4 @@ defmodule GoldBackend.Services.InsightCache do
   # Compatibility entry point: AI results only enrich the existing rule snapshot.
   def confirmed_snapshot(context, _rule_action, result, _opts \\ []),
     do: TradingController.rule_snapshot(context) |> apply_commentary(result)
-
-  defp quote_valid?(context, %{price: price, timestamp: at}) when is_number(price) do
-    plan = context.plan
-    age = DateTime.diff(DateTime.utc_now(), at)
-
-    age in -5..120 and abs(price - plan.entry) <= min(0.25 * context.indicators.atr_14, 1.0) and
-      if(plan.action == "buy",
-        do: price > plan.stop_loss and price < plan.take_profit,
-        else: price < plan.stop_loss and price > plan.take_profit
-      )
-  end
-
-  defp quote_valid?(_, _), do: false
 end

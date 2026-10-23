@@ -11,8 +11,7 @@ defmodule GoldBackendWeb.TradingController do
     GoldOhlc,
     OhlcContext,
     BiasEngine,
-    SetupEngine,
-    Zoi,
+    SetupLifecycle,
     EconomicCalendar,
     Indicators,
     NewsBias,
@@ -87,6 +86,9 @@ defmodule GoldBackendWeb.TradingController do
   def overview(conn, _params), do: cached_response(conn)
   def analyze_and_get_data(conn, _params), do: cached_response(conn)
 
+  def signal_history(conn, _params),
+    do: json(conn, %{status: "success", data: GoldBackend.Services.SignalHistory.list()})
+
   defp cached_response(conn) do
     snapshot =
       InsightCache.snapshot() ||
@@ -111,7 +113,8 @@ defmodule GoldBackendWeb.TradingController do
         data =
           Map.merge(data, %{
             news_3d_count: length(articles),
-            news_3d: Enum.map(articles, &article_json/1)
+            news_3d: Enum.map(articles, &article_json/1),
+            rule_statistics: GoldBackend.Services.RuleStatistics.recent(now)
           })
 
         json(conn, %{status: "success", data: data})
@@ -152,6 +155,8 @@ defmodule GoldBackendWeb.TradingController do
           Map.merge(context.plan, %{
             action: "wait",
             action_label: "Đứng ngoài",
+            setup_status: "paused",
+            execution_ready: false,
             block_reason: reason,
             summary: reason
           }),
@@ -168,6 +173,18 @@ defmodule GoldBackendWeb.TradingController do
       ai_status: if(plan.action in ["buy", "sell"], do: "pending", else: "not_requested"),
       ai_cached_at: DateTime.to_iso8601(at),
       ai_ttl_seconds: InsightCache.interval_seconds(),
+      signal_valid_until:
+        if(plan.action in ["buy", "sell"],
+          do: DateTime.to_iso8601(DateTime.add(context.latest.timestamp, 121)),
+          else: nil
+        ),
+      next_evaluation_at:
+        DateTime.to_iso8601(
+          DateTime.add(
+            CandleClock.closed_at(at, InsightCache.interval_seconds()),
+            InsightCache.interval_seconds() + 35
+          )
+        ),
       analysis_candle_closed_at: DateTime.to_iso8601(CandleClock.closed_at(at)),
       ai_next_analysis_at: DateTime.to_iso8601(CandleClock.next_close(at))
     })
@@ -259,21 +276,6 @@ defmodule GoldBackendWeb.TradingController do
 
       closed_h1_bars = if ohlc, do: ohlc.h1, else: []
       bias = BiasEngine.assess(closed_h1_bars, now)
-      trigger_open = DateTime.add(CandleClock.closed_at(now), -900)
-
-      location_h1 =
-        Enum.filter(
-          closed_h1_bars,
-          &(DateTime.compare(DateTime.add(&1.open_time, 3600), trigger_open) != :gt)
-        )
-
-      location_i =
-        if location_h1 == [],
-          do: summary.indicators,
-          else: Indicators.summarize_candles(location_h1, 3600).indicators
-
-      zones = if location_h1 == [], do: [], else: Zoi.build(location_h1, location_i, trigger_open)
-      m15_setup = SetupEngine.assess(m15, bias, zones, now)
 
       calendar =
         if Keyword.get(opts, :stored_only, false),
@@ -281,6 +283,13 @@ defmodule GoldBackendWeb.TradingController do
           else: EconomicCalendar.snapshot(now)
 
       events = calendar.events
+      m15_setup = SetupLifecycle.assess(m15, closed_h1_bars, bias, now, events)
+
+      m15_setup =
+        if Keyword.get(opts, :stored_only, false),
+          do: m15_setup,
+          else: GoldBackend.Services.SetupRegistry.resolve(m15_setup, m15, bias, now, events)
+
       blocking = EconomicCalendar.blocking(events, now)
       news_bias = NewsBias.assess(news, now)
       price_action = recent_price_action(prices, latest, now)
@@ -305,6 +314,7 @@ defmodule GoldBackendWeb.TradingController do
          analysis_at: now,
          ohlc_feed: feed,
          m15_setup: m15_setup,
+         m15_candles: m15,
          prices: prices,
          news: news,
          news_bias: news_bias,
@@ -314,6 +324,7 @@ defmodule GoldBackendWeb.TradingController do
          warmup_detail: warmup_detail,
          live_price_ticks: live_ticks,
          events: events,
+         calendar_status: calendar.status,
          plan: plan,
          price_ticks: length(prices),
          price_action: price_action

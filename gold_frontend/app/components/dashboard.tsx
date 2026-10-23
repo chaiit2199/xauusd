@@ -12,6 +12,8 @@ import { MarketOverview } from "./market-overview";
 import { TradeTicket } from "./trade-ticket";
 import { SiteHeader } from "./site-header";
 import { EconomicEvents } from "./economic-events";
+import { RuleStatistics } from "./rule-statistics";
+import { SignalHistory } from "./signal-history";
 
 const BOARD_MS = 60_000;
 
@@ -31,6 +33,7 @@ export function Dashboard() {
   const [analyzeError, setAnalyzeError] = useState<string | null>(null);
   const [boardError, setBoardError] = useState<string | null>(null);
   const [nextIn, setNextIn] = useState<number | null>(null);
+  const [now, setNow] = useState(() => Date.now());
   const analyzingRef = useRef(false);
   const analyzeLock = useRef(false);
 
@@ -106,6 +109,7 @@ export function Dashboard() {
       board?.ai_ttl_seconds ?? board?.analysis_interval_seconds ?? 900;
 
     function tick() {
+      setNow(Date.now());
       if (!cachedAt) {
         setNextIn(null);
         return;
@@ -117,8 +121,9 @@ export function Dashboard() {
         return;
       }
 
-      const scheduledMs = board?.ai_next_analysis_at
-        ? Date.parse(board.ai_next_analysis_at)
+      const nextUpdate = board?.next_evaluation_at ?? board?.ai_next_analysis_at;
+      const scheduledMs = nextUpdate
+        ? Date.parse(nextUpdate)
         : (Math.floor(cachedMs / (ttl * 1000)) + 1) * ttl * 1000;
       const remaining = Math.max(
         0,
@@ -130,7 +135,7 @@ export function Dashboard() {
     tick();
     const id = window.setInterval(tick, 1_000);
     return () => window.clearInterval(id);
-  }, [cachedAt, board?.ai_ttl_seconds, board?.analysis_interval_seconds, board?.ai_next_analysis_at]);
+  }, [cachedAt, board?.ai_ttl_seconds, board?.analysis_interval_seconds, board?.ai_next_analysis_at, board?.next_evaluation_at]);
 
   async function onCrawl() {
     setCrawling(true);
@@ -175,7 +180,7 @@ export function Dashboard() {
     }
   }
 
-  const view = board ? expireAnalysis(board, Date.now()) : null;
+  const view = board ? expireAnalysis(board, now) : null;
   const expired = view !== board;
   const intervalSeconds =
     view?.analysis_interval_seconds ?? view?.ai_ttl_seconds ?? 900;
@@ -256,6 +261,7 @@ export function Dashboard() {
           />
 
           <TradeTicket plan={view.cfd_plan} aiAction={view.ai_action} />
+          {view.rule_statistics ? <RuleStatistics data={view.rule_statistics} /> : null}
 
           {view.m15_setup ? <details className="panel analysis-details">
             <summary>Dữ liệu và xác nhận M15</summary>
@@ -279,6 +285,7 @@ export function Dashboard() {
         </>
       ) : null}
       <div className="news-band">
+        <SignalHistory />
         <NewsList title="Tin mới nhất · hôm nay và hôm qua (UTC)" filterable articles={articles}
           empty="Chưa có tin hôm nay và hôm qua theo UTC. Chọn “Cập nhật tin” để đồng bộ." />
       </div>

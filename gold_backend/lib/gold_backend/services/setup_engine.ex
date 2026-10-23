@@ -1,8 +1,16 @@
 defmodule GoldBackend.Services.SetupEngine do
   @moduledoc "Closed provider M15 triggers at a pre-existing ZOI; alternatives, not cumulative requirements."
-  alias GoldBackend.Services.{CandleClock, Indicators, Zoi}
+  alias GoldBackend.Services.{
+    CandleClock,
+    DecisionPlan,
+    EntryQuality,
+    Indicators,
+    MarketStructure,
+    StrategyPolicy,
+    Zoi
+  }
 
-  def assess(bars, bias, zones, now) do
+  def assess(bars, bias, zones, now, context \\ nil) do
     slot = CandleClock.closed_at(now)
 
     bars =
@@ -25,7 +33,11 @@ defmodule GoldBackend.Services.SetupEngine do
       take_profit: nil,
       atr: nil,
       zones: zones,
-      zone: nil
+      zone: nil,
+      barrier: nil,
+      technical_context: context,
+      supporting_evidence: [],
+      candidate_count: 0
     }
 
     valid =
@@ -48,11 +60,16 @@ defmodule GoldBackend.Services.SetupEngine do
         base = %{base | indicators: i, atr: i.atr_14, entry: last.close}
         touched = Enum.filter(zones, &Zoi.touch?(last, &1))
 
-        found =
-          Enum.find_value(touched, fn zone ->
+        candidates =
+          Enum.flat_map(touched, fn zone ->
             case pattern(last, prev, zone, bias.side) do
-              nil -> nil
-              name -> {name, zone}
+              nil ->
+                []
+
+              name ->
+                if entry_side?(zone, bias.side) or name == "breakout_retest",
+                  do: [candidate(base, last, zone, name, bias.side)],
+                  else: []
             end
           end)
 
@@ -67,62 +84,111 @@ defmodule GoldBackend.Services.SetupEngine do
                 reason: "Chờ giá hồi về ZOI; chưa xét mẫu nến ngoài vùng."
             }
 
-          is_nil(found) ->
+          candidates == [] ->
             %{
               base
               | state: "wait_m15",
-                reason: "Đã chạm ZOI; chờ pinbar, engulfing hoặc sweep–reclaim M15 cùng hướng H1."
+                reason:
+                  "Đã chạm ZOI; chờ pinbar, engulfing, sweep–reclaim hoặc phá vỡ–retest M15 cùng hướng H1."
             }
 
           true ->
-            {name, zone} = found
-            buffer = max(0.1 * i.atr_14, 0.01)
-
-            stop =
-              if bias.side == "buy",
-                do: min(last.low, zone.low) - buffer,
-                else: max(last.high, zone.high) + buffer
-
-            risk = abs(last.close - stop)
-            target = if bias.side == "buy", do: last.close + 2 * risk, else: last.close - 2 * risk
-            # Cap at the nearest already-known opposing daily level.
-            barriers =
-              zones
-              |> Enum.reject(&(&1.id == zone.id or &1.id == "sma20_h1"))
-              |> Enum.map(& &1.mid)
-
-            ahead =
-              Enum.filter(barriers, fn p ->
-                if bias.side == "buy", do: p > last.close, else: p < last.close
-              end)
-
-            target =
-              Enum.reduce(ahead, target, fn p, t ->
-                if bias.side == "buy", do: min(p, t), else: max(p, t)
-              end)
-
-            if risk <= 0 or risk > 5 * i.atr_14 or target <= 0 do
-              %{
-                base
-                | state: "invalid_levels",
-                  reason: "SL vượt 5 ATR M15 hoặc mức giá không hợp lệ."
-              }
-            else
-              %{
-                base
-                | blocked: false,
-                  action: bias.side,
-                  state: "ready",
-                  pattern: name,
-                  zone: zone,
-                  stop_loss: Float.round(stop, 2),
-                  take_profit: Float.round(target, 2),
-                  reason: "M15 đã đóng xác nhận #{name} tại #{zone.id}."
-              }
-            end
+            # Evaluate every touched zone; input order must not hide a viable setup.
+            selected = Enum.max_by(candidates, &rank/1)
+            %{selected | candidate_count: length(candidates)}
         end
     end
   end
+
+  defp candidate(base, last, zone, name, side) do
+    buffer = max(0.1 * base.atr, 0.01)
+
+    stop =
+      if side == "buy",
+        do: min(last.low, zone.low) - buffer,
+        else: max(last.high, zone.high) + buffer
+
+    risk = abs(last.close - stop)
+
+    barrier =
+      base.zones
+      |> Enum.reject(
+        &(&1.id == zone.id or &1.id == "sma20_h1" or Map.get(&1, :entry_only, false))
+      )
+      |> Enum.filter(fn z ->
+        if side == "buy",
+          do:
+            z.id != "previous_day_low" and not String.starts_with?(z.id, "swing_low") and
+              z.mid > last.close,
+          else:
+            z.id != "previous_day_high" and not String.starts_with?(z.id, "swing_high") and
+              z.mid < last.close
+      end)
+      |> Enum.min_by(
+        fn z -> {if(side == "buy", do: z.low - last.close, else: last.close - z.high), z.id} end,
+        fn -> nil end
+      )
+
+    target = if barrier, do: if(side == "buy", do: barrier.low, else: barrier.high)
+
+    if risk <= 0 or risk > StrategyPolicy.max_stop_atr() * base.atr or stop <= 0 or
+         (is_number(target) and target <= 0) do
+      %{base | state: "invalid_levels", reason: "SL vượt 5 ATR M15 hoặc mức giá không hợp lệ."}
+    else
+      %{
+        base
+        | blocked: false,
+          action: side,
+          state: "ready",
+          pattern: name,
+          zone: zone,
+          barrier: barrier,
+          stop_loss: Float.round(stop, 2),
+          take_profit: if(target, do: Float.round(target * 1.0, 2)),
+          supporting_evidence: MarketStructure.evidence(base.technical_context, side, zone),
+          reason: "M15 đã đóng xác nhận #{pattern_label(name)} tại #{zone.id}."
+      }
+      |> GoldBackend.Services.SetupLifecycle.identify()
+    end
+  end
+
+  defp rank(%{blocked: true}), do: {0, 0.0, 0, ""}
+
+  defp rank(s) do
+    cost = StrategyPolicy.assumed_spread()
+    quality = if s.take_profit, do: EntryQuality.assess(s, s.entry, cost)
+
+    tier =
+      cond do
+        quality && quality.target_reached -> 0
+        quality && quality.levels_ok && quality.structure_ok && quality.reward_risk_ok -> 4
+        DecisionPlan.entry_zone(s, cost) != nil -> 3
+        quality != nil -> 2
+        true -> 1
+      end
+
+    {tier, if(quality, do: quality.reward_risk, else: 0.0),
+     Enum.count(s.supporting_evidence, & &1.supports), s.zone.id}
+  end
+
+  defp entry_side?(zone, side) do
+    cond do
+      zone.id in ["previous_day_high", "aoi_high_h1"] or
+          String.starts_with?(zone.id, "swing_high") ->
+        side == "sell"
+
+      zone.id in ["previous_day_low", "aoi_low_h1"] or String.starts_with?(zone.id, "swing_low") ->
+        side == "buy"
+
+      true ->
+        true
+    end
+  end
+
+  defp pattern_label("breakout_retest"), do: "phá vỡ–retest"
+  defp pattern_label("pullback_pinbar"), do: "pinbar"
+  defp pattern_label("pullback_engulfing"), do: "engulfing"
+  defp pattern_label("sweep_reclaim"), do: "sweep–reclaim"
 
   def pattern(b, p, z, side) when side in ["buy", "sell"] do
     span = b.high - b.low
@@ -150,7 +216,24 @@ defmodule GoldBackend.Services.SetupEngine do
           do: b.low < z.low and b.close > z.mid and p.close >= z.low,
           else: b.high > z.high and b.close < z.mid and p.close <= z.high
 
+    # Two closed candles: a body crosses the zone, then a directional retest
+    # holds its far edge. The zone must already exist before the breakout bar.
+    known_before_break =
+      is_nil(Map.get(z, :known_at)) or
+        (Map.has_key?(p, :open_time) and z.known_at <= DateTime.to_iso8601(p.open_time))
+
+    retest =
+      directional and known_before_break and
+        if buy,
+          do:
+            p.open <= z.high and p.close > z.high and b.low <= z.high and b.low > z.low and
+              b.close > z.high,
+          else:
+            p.open >= z.low and p.close < z.low and b.high >= z.low and b.high < z.high and
+              b.close < z.low
+
     cond do
+      retest -> "breakout_retest"
       pin -> "pullback_pinbar"
       engulf -> "pullback_engulfing"
       reclaim -> "sweep_reclaim"

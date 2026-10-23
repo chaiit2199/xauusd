@@ -80,6 +80,15 @@ defmodule GoldBackend.Services.TelegramNotifier do
 
   def notify(_, _), do: {:error, "Snapshot không hợp lệ để gửi Telegram."}
 
+  defp validate_slot(%{signal_valid_until: expiry} = snapshot) when is_binary(expiry) do
+    with {:ok, at, _} <- DateTime.from_iso8601(expiry),
+         :lt <- DateTime.compare(DateTime.utc_now(), at) do
+      validate_slot(Map.delete(snapshot, :signal_valid_until))
+    else
+      _ -> failure("Không gửi tín hiệu có báo giá đã quá hạn.")
+    end
+  end
+
   defp validate_slot(%{ai_next_analysis_at: expiry}) do
     case if(is_binary(expiry), do: DateTime.from_iso8601(expiry), else: :invalid) do
       {:ok, at, _} ->

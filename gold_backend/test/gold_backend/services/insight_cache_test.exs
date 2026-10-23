@@ -3,6 +3,31 @@ defmodule GoldBackend.Services.InsightCacheTest do
 
   alias GoldBackend.Services.{CandleClock, InsightCache}
 
+  test "setup expiry overrides otherwise fresh metadata" do
+    data = %{
+      ai_next_analysis_at: "2026-10-23T08:45:00Z",
+      cfd_plan: %{action: "buy", setup_expires_at: "2026-10-23T08:30:00Z"}
+    }
+
+    result = InsightCache.expire_snapshot(data, ~U[2026-10-23 08:30:00Z])
+    assert result.cfd_plan.action == "wait"
+    assert result.cfd_plan.setup_status == "expired"
+  end
+
+  test "a stale reference quote expires before the M15 analysis boundary" do
+    snapshot = %{
+      ai_next_analysis_at: "2026-10-23T08:15:00Z",
+      signal_valid_until: "2026-10-23T08:02:01Z",
+      cfd_plan: %{action: "buy"}
+    }
+
+    assert InsightCache.expire_snapshot(snapshot, ~U[2026-10-23 08:02:00Z]) == snapshot
+    expired = InsightCache.expire_snapshot(snapshot, ~U[2026-10-23 08:02:01Z])
+    assert expired.cfd_plan.action == "wait"
+    assert expired.cfd_plan.setup_status == "paused"
+    assert expired.ai_error =~ "Báo giá"
+  end
+
   test "a note stays usable inside its quarter hour when the side is unchanged" do
     now = ~U[2026-10-21 13:14:59Z]
     cached_at = ~U[2026-10-21 13:01:00Z]
@@ -24,8 +49,8 @@ defmodule GoldBackend.Services.InsightCacheTest do
     refute InsightCache.fresh?(cached_at, "wait", "sell", now)
   end
 
-  test "checks run every five minutes while candle clock remains M15" do
-    assert InsightCache.interval_seconds() == 300
+  test "checks run every minute while candle clock remains M15" do
+    assert InsightCache.interval_seconds() == 60
     assert CandleClock.next_close(~U[2026-10-21 13:07:00Z]) == ~U[2026-10-21 13:15:00Z]
     assert CandleClock.next_close(~U[2026-10-21 23:59:59Z]) == ~U[2026-10-22 00:00:00Z]
     assert CandleClock.delay_ms(~U[2026-10-21 13:14:59.500Z]) == 500
@@ -75,7 +100,7 @@ defmodule GoldBackend.Services.InsightCacheTest do
       state = %{
         job: job,
         job_slot: nil,
-        last_slot: CandleClock.closed_at(DateTime.utc_now(), 300),
+        last_slot: CandleClock.closed_at(DateTime.utc_now(), 60),
         timer: timer
       }
 
@@ -183,7 +208,7 @@ defmodule GoldBackend.Services.InsightCacheTest do
                ai_insight: nil,
                ai_error: nil,
                ai_cached_at: nil,
-               ai_ttl_seconds: 300
+               ai_ttl_seconds: 60
              }
     after
       :sys.resume(pid)

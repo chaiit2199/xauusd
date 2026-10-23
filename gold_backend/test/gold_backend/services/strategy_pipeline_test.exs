@@ -12,6 +12,7 @@ defmodule GoldBackend.Services.StrategyPipelineTest do
 
   @now ~U[2026-10-23 08:00:35Z]
   @zone %{id: "sma20_h1", low: 99.0, mid: 100.0, high: 101.0}
+  @resistance %{id: "previous_day_high", low: 108.0, mid: 109.0, high: 110.0}
   @bias %{side: "buy", reason: "H1 tăng", locked_until: nil, adx: 30.0, slope: 0.5}
 
   defp bars do
@@ -51,7 +52,8 @@ defmodule GoldBackend.Services.StrategyPipelineTest do
         %{b | open: 200 - b.open, close: 200 - b.close, high: 200 - b.low, low: 200 - b.high}
       end)
 
-    setup = SetupEngine.assess(mirrored, %{@bias | side: "sell"}, [@zone], @now)
+    support = %{id: "previous_day_low", low: 90.0, mid: 91.0, high: 92.0}
+    setup = SetupEngine.assess(mirrored, %{@bias | side: "sell"}, [@zone, support], @now)
     assert setup.action == "sell"
     assert setup.stop_loss > setup.entry
     assert setup.take_profit < setup.entry
@@ -126,7 +128,7 @@ defmodule GoldBackend.Services.StrategyPipelineTest do
   end
 
   test "ready setup is not vetoed by RSI 53, opposing AI or headline conflict" do
-    setup = SetupEngine.assess(triggered(), @bias, [@zone], @now)
+    setup = SetupEngine.assess(triggered(), @bias, [@zone, @resistance], @now)
     i = %{current_price: 101.0, sma_20: 100.0, macd: 1.0, rsi_14: 53.0}
 
     plan =
@@ -169,12 +171,12 @@ defmodule GoldBackend.Services.StrategyPipelineTest do
     statuses = Map.new(plan.checks, &{&1.code, &1.status})
     assert statuses["session"] == "blocked"
     assert statuses["quote"] == "blocked"
-    assert statuses["calendar_data"] == "blocked"
+    assert statuses["calendar_data"] == "unknown"
     assert statuses["reward_risk"] == "unknown"
   end
 
   test "spread cost, stale quote and adverse entry drift cannot be ignored" do
-    setup = SetupEngine.assess(triggered(), @bias, [@zone], @now)
+    setup = SetupEngine.assess(triggered(), @bias, [@zone, @resistance], @now)
     i = %{current_price: 101.0, sma_20: 100.0, macd: 1.0, rsi_14: 53.0}
 
     for opts <- [
@@ -188,6 +190,18 @@ defmodule GoldBackend.Services.StrategyPipelineTest do
     end
 
     assert StrategyPlan.build(i, setup.entry + 2, options(setup)).action == "wait"
+  end
+
+  test "a confirmation without a structural target waits instead of inventing two R" do
+    setup = SetupEngine.assess(triggered(), @bias, [@zone], @now)
+    assert setup.take_profit == nil
+    i = %{current_price: 101.0, sma_20: 100.0, macd: 1.0, rsi_14: 53.0}
+    plan = StrategyPlan.build(i, setup.entry, options(setup))
+    assert plan.action == "wait"
+    assert plan.setup_status == "wait_target"
+    assert plan.decision_plan.take_profit == nil
+    assert plan.decision_plan.entry_zone == nil
+    assert plan.decision_plan.cost.description =~ "giả định"
   end
 
   test "calendar includes all High USD events and exact asymmetric boundaries" do

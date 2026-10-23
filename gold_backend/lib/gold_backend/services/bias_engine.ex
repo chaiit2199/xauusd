@@ -41,8 +41,30 @@ defmodule GoldBackend.Services.BiasEngine do
 
         at = DateTime.add(List.last(prefix).open_time, 3600)
 
-        transition(previous, raw, at)
-        |> Map.merge(%{adx: Float.round(strength, 2), slope: Float.round(slope, 3)})
+        result = transition(previous, raw, at)
+
+        reason =
+          cond do
+            result.side in ["buy", "sell"] ->
+              relation = if result.side == "buy", do: "trên", else: "dưới"
+
+              "H1 ưu tiên #{String.upcase(result.side)}: giá #{i.current_price} nằm #{relation} SMA20 #{i.sma_20}, MACD #{i.macd} cùng hướng; ADX #{Float.round(strength, 1)}, độ dốc SMA20 #{Float.round(slope, 2)} ATR."
+
+            raw == "neutral" and (strength < 20 or abs(slope) < 0.1) ->
+              "Đứng ngoài: xu hướng H1 chưa đủ mạnh (ADX #{Float.round(strength, 1)}; độ dốc SMA20 #{Float.round(slope, 2)} ATR)."
+
+            raw == "neutral" ->
+              "Đứng ngoài: giá, SMA20 và động lượng H1 chưa đồng thuận BUY/SELL."
+
+            true ->
+              result.reason
+          end
+
+        Map.merge(result, %{
+          reason: reason,
+          adx: Float.round(strength, 2),
+          slope: Float.round(slope, 3)
+        })
       end)
     else
       base

@@ -34,7 +34,30 @@ defmodule GoldBackend.Services.Zoi do
           end
       end
 
-    [zone("sma20_h1", indicators.sma_20, indicators.atr_14 * 0.35) | day_zones]
+    [zone("sma20_h1", indicators.sma_20, indicators.atr_14 * 0.35) | day_zones] ++
+      swing_zones(h1, indicators.atr_14 * 0.1)
+  end
+
+  # Two closed bars on either side confirm a swing. Only the latest of each is used.
+  defp swing_zones(h1, half) do
+    swings = h1 |> Enum.sort_by(& &1.open_time, DateTime) |> Enum.chunk_every(5, 1, :discard)
+
+    Enum.flat_map([:high, :low], fn side ->
+      found =
+        Enum.find(Enum.reverse(swings), fn [a, b, c, d, e] ->
+          Enum.all?([a, b, d, e], fn other ->
+            if side == :high, do: c.high > other.high, else: c.low < other.low
+          end)
+        end)
+
+      case found do
+        nil ->
+          []
+
+        [_, _, c, _, _] ->
+          [zone("swing_#{side}_#{DateTime.to_unix(c.open_time)}", Map.fetch!(c, side), half)]
+      end
+    end)
   end
 
   def touch?(bar, zone), do: bar.low <= zone.high and bar.high >= zone.low

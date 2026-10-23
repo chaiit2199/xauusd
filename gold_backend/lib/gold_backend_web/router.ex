@@ -18,5 +18,6 @@ defmodule GoldBackendWeb.Router do
     get "/news", TradingController, :news
     get "/overview", TradingController, :overview
     get "/analyze", TradingController, :analyze_and_get_data
+    get "/signals", TradingController, :signal_history
   end
 end

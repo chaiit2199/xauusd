@@ -76,25 +76,13 @@ export function MarketOverview({ board }: { board: MarketBoard }) {
           <dd>{prices.length ? money(Math.min(...prices)) : "—"}</dd>
           <span>Trong phạm vi biểu đồ</span>
         </div>
-        <div>
-          <dt>Spread giả định</dt>
+        {board.cfd_plan.spread_source === "observed" ? <div>
+          <dt>Spread</dt>
           <dd>{money(board.cfd_plan.spread)}</dd>
-          <span>Dùng để tính R:R</span>
-        </div>
+          <span>Chênh lệch giá mua / bán</span>
+        </div> : null}
       </dl>
 
-      <details className="quote-details">
-        <summary>Phạm vi và nguồn dữ liệu</summary>
-        <p className="basis">
-          {candles ? "Thống kê theo giá đóng các nến M15 trên biểu đồ; không phải High/Low của nến." : "Thống kê theo các mẫu trên biểu đồ, có thể gồm giá khởi tạo hoặc mô phỏng."}
-          Chưa có thống kê 24 giờ, cao/thấp trong ngày và spread trực tiếp từ sàn.
-        </p>
-        <p className="basis">
-          {board.price_ticks_5d} {candles ? "nến M15 đã lưu" : "mẫu giá / 5 ngày"}
-          {typeof board.live_price_ticks === "number" ? ` · ${board.live_price_ticks} mẫu thị trường` : ""}
-          {` · ${board.hourly_samples} mẫu giờ · ${board.indicator_basis}`}
-        </p>
-      </details>
     </section>
   );
 }

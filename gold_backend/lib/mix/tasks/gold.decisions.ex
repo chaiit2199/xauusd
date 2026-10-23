@@ -1,26 +1,19 @@
 defmodule Mix.Tasks.Gold.Decisions do
   use Mix.Task
-  import Ecto.Query
-  @shortdoc "Summarize unique M15 decisions and blocking checks (no orders sent)"
+  @shortdoc "Summarize signal checks over the last seven days (no orders sent)"
   def run(_) do
     Mix.Task.run("app.config")
     Application.put_env(:gold_backend, :start_price_fetcher, false)
     Mix.Task.run("app.start")
-    rows = GoldBackend.Repo.all(from d in "strategy_decisions", select: d.snapshot)
+    stats = GoldBackend.Services.RuleStatistics.recent()
+    Mix.shell().info("#{stats.version}: #{stats.evaluations} evaluations / #{stats.days} days")
 
-    counts =
-      rows
-      |> Enum.flat_map(&Map.get(&1, "checks", []))
-      |> Enum.reject(&(&1["status"] == "pass"))
-      |> Enum.frequencies_by(&{&1["code"], &1["status"]})
+    Enum.each(stats.checks, fn c ->
+      Mix.shell().info(
+        "#{c.code}: evaluated=#{c.evaluated} pass=#{c.pass} blocked=#{c.blocked} unknown=#{c.unknown} sole_blocker=#{c.sole_blocker}"
+      )
+    end)
 
-    Mix.shell().info("Unique M15 decisions: #{length(rows)}")
-
-    Enum.sort(counts)
-    |> Enum.each(fn {{code, status}, n} -> Mix.shell().info("#{code} [#{status}]: #{n}") end)
-
-    Mix.shell().info(
-      "Blocked counts are not missed profitable trades. Validate outcomes separately."
-    )
+    Mix.shell().info("Signal evaluations are not fills or profitable-trade outcomes.")
   end
 end

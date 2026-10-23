@@ -2,10 +2,10 @@
 
 Dockerfile không sao chép `rel/`, vì vậy cấu hình trong `rel/env.sh.eex` không
 được đưa vào image. Docker Compose nhận thông tin bot từ `env.sh` trên VPS.
-Chỉ gửi khi quyết định cuối cùng (`cfd_plan.action`) là `buy` hoặc `sell` và
-không có lỗi AI, và toàn bộ nhận định vượt qua kiểm tra tiếng Việt/chống lặp
-trước khi rút gọn tin nhắn. `wait` / “Đứng ngoài” không gửi, kể cả AI đề xuất Buy/Sell
-nhưng điều kiện kiểm soát rủi ro đã khóa lệnh.
+Luồng hiện hành gửi tín hiệu khi rule xác nhận `buy` hoặc `sell`, một lần cho mỗi
+setup. Không giới hạn một phiếu mỗi phiên. AI bổ sung bình luận sau, không giữ
+hoặc phủ quyết tín hiệu; nội dung AI chỉ được dùng khi vượt kiểm tra chất lượng.
+`wait` / “Đứng ngoài” không gửi. Đây là tín hiệu tham khảo, không xác nhận lệnh khớp.
 Nhận định hết chu kỳ M15 không được gửi. Khi chưa cấu hình `GOLD_API_KEY`, nguồn lỗi hoặc chưa đủ 30 nến M15/H1,
 tín hiệu giữ `wait`, nên chưa có thông báo Buy/Sell. OHLC được đồng bộ tự động
 35 giây sau các mốc đóng nến; xem tiến độ trên giao diện và hướng dẫn trong [AI.md](AI.md).
@@ -33,7 +33,7 @@ tín hiệu giữ `wait`, nên chưa có thông báo Buy/Sell. OHLC được đ�
 
    Kết quả cần là `%{configured: true, missing: []}`. Kết quả này xác nhận đủ
    cấu hình; việc Telegram chấp nhận tin được xác nhận bằng log gửi thành công.
-5. Đợi một vòng phân tích có kết quả Buy/Sell (chu kỳ 15 phút tại :00/:15/:30/:45), rồi xem log.
+5. Đợi setup M15 được xác nhận; điều kiện phát tín hiệu kiểm tra lại mỗi phút, rồi xem log.
    Nếu kết quả là “Đứng ngoài”, không có tin Telegram là hành vi đúng:
 
    ```bash
