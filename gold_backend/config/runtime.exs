@@ -3,7 +3,7 @@ import Config
 config :gold_backend, :ollama,
   url: System.get_env("OLLAMA_URL", "http://localhost:11434/api/generate"),
   model: System.get_env("OLLAMA_MODEL", "deepseek-r1:1.5b"),
-  timeout_ms: String.to_integer(System.get_env("OLLAMA_TIMEOUT_MS", "120000")),
+  timeout_ms: String.to_integer(System.get_env("OLLAMA_TIMEOUT_MS", "300000")),
   translation_timeout_ms:
     String.to_integer(System.get_env("OLLAMA_TRANSLATION_TIMEOUT_MS", "60000")),
   num_predict: String.to_integer(System.get_env("OLLAMA_NUM_PREDICT", "800"))

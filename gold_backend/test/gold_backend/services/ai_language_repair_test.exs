@@ -218,7 +218,7 @@ defmodule GoldBackend.Services.AiLanguageRepairTest do
   end
 
   test "worker budget covers both configured requests and connection overhead" do
-    assert AiDecision.max_duration_ms([]) == 190_000
+    assert AiDecision.max_duration_ms([]) == 370_000
 
     assert AiDecision.max_duration_ms(timeout_ms: 180_000, translation_timeout_ms: 90_000) ==
              280_000

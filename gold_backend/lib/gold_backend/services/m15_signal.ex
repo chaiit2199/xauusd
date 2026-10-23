@@ -32,8 +32,8 @@ defmodule GoldBackend.Services.M15Signal do
         |> Enum.take(-50)
 
       cond do
-        length(closed) < 50 ->
-          %{base | reason: "Cần ít nhất 50 nến OHLC M15 đã đóng để tính chỉ báo."}
+        length(closed) < 30 ->
+          %{base | reason: "Cần ít nhất 30 nến OHLC M15 đã đóng để tính chỉ báo."}
 
         not Enum.all?(closed, &valid_bar?/1) ->
           %{base | reason: "OHLC M15 không hợp lệ hoặc chưa được nguồn xác nhận đóng nến."}

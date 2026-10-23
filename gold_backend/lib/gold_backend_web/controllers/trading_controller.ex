@@ -24,7 +24,7 @@ defmodule GoldBackendWeb.TradingController do
 
   alias GoldBackend.Trading.{GoldPrice, NewsArticle}
 
-  # Seed supports display only. Trading requires 50 closed live H1 samples
+  # Seed supports display only. Trading requires 30 closed live H1 samples
   # and a confirmed provider M15 setup. Synthetic quotes remain warmup data.
   @live_origins ~w(metals_dev gold_api)
 
@@ -149,7 +149,7 @@ defmodule GoldBackendWeb.TradingController do
         configured: GoldOhlc.configured?(),
         m15_count: length(m15),
         h1_count: length(h1),
-        required: 50,
+        required: 30,
         latest_m15_closed_at: if(ohlc, do: ohlc.m15_closed_at, else: nil)
       })
 
@@ -187,7 +187,7 @@ defmodule GoldBackendWeb.TradingController do
 
           not h1_ready ->
             {true,
-             "Đang tích lũy OHLC Gold API: M15 #{length(m15)}/50, H1 #{length(h1)}/50; cần H1 mới nhất đã đóng."}
+             "Đang tích lũy OHLC Gold API: M15 #{length(m15)}/30, H1 #{length(h1)}/30; cần H1 mới nhất đã đóng."}
 
           true ->
             {false, nil}

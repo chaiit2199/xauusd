@@ -200,6 +200,8 @@ defmodule GoldBackend.Services.OhlcSyncTest do
     forming_h1 = %{List.last(h1) | open_time: ~U[2026-10-22 15:00:00Z], close: 9999.0}
     data = OhlcContext.build(m15 ++ [forming_m15], h1 ++ [forming_h1], @slot)
     assert data.h1_ready
+    assert OhlcContext.build(m15, Enum.take(h1, -30), @slot).h1_ready
+    refute OhlcContext.build(m15, Enum.take(h1, -29), @slot).h1_ready
     assert data.summary.indicators.current_price == 4100.0
     assert data.summary.indicators.atr_14 == 4.0
     assert Decimal.to_float(data.latest.price) == 4100.0

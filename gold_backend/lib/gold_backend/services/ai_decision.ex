@@ -2,7 +2,7 @@ defmodule GoldBackend.Services.AiDecision do
   require Logger
 
   @connect_timeout_ms 5_000
-  @analysis_timeout_ms 120_000
+  @analysis_timeout_ms 300_000
   @translation_timeout_ms 60_000
 
   # Include connection time for both requests in the worker watchdog.

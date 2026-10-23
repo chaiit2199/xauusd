@@ -160,8 +160,8 @@ OHLC không hợp lệ được bỏ qua sáu giờ để không kẹt mãi ở 
 Trong điều kiện nguồn liên tục có dữ liệu, cần khoảng **50 chu kỳ ≈ 12,5 giờ**
 để có 50 nến mỗi khung. Lỗi mạng, quota và giờ thị trường đóng cửa làm lâu hơn.
 Không cam kết thời điểm có lệnh. Giao diện hiển thị số M15/H1 đã lưu và lỗi nguồn.
-M15 vẫn yêu cầu 50 nến liên tục, mới nhất đúng mốc phân tích; khoảng nghỉ/gap
-trong cửa sổ đó giữ `wait` cho đến khi có chuỗi hợp lệ. H1 cần 50 nến và giờ
+M15 yêu cầu tối thiểu 30 nến liên tục, mới nhất đúng mốc phân tích; khoảng nghỉ/gap
+trong cửa sổ đó giữ `wait` cho đến khi có chuỗi hợp lệ. H1 cần tối thiểu 30 nến và giờ
 đã đóng mới nhất. Dữ liệu cũ chỉ phục vụ hiển thị khi nguồn không sẵn sàng.
 
 Kết quả AI sang chu kỳ sau bị loại; snapshot hết hạn chuyển `wait`, Telegram
@@ -194,7 +194,7 @@ Trong `/home/deploy_user/xauusd/env.sh`, giữ nguyên dòng `OLLAMA_MODEL` và 
 hoặc sửa các biến sau (đơn vị timeout là mili giây):
 
 ```bash
-export OLLAMA_TIMEOUT_MS=120000
+export OLLAMA_TIMEOUT_MS=300000
 export OLLAMA_TRANSLATION_TIMEOUT_MS=60000
 export OLLAMA_NUM_PREDICT=800
 ```

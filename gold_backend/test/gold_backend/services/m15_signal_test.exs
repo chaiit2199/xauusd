@@ -35,13 +35,18 @@ defmodule GoldBackend.Services.M15SignalTest do
 
     for invalid <- [
           [],
-          Enum.drop(candles, 1),
+          Enum.take(candles, -29),
           Enum.map(candles, &%{&1 | open_time: DateTime.add(&1.open_time, -900)}),
           List.replace_at(candles, 20, Enum.at(candles, 19)),
           List.update_at(candles, 20, &%{&1 | open_time: DateTime.add(&1.open_time, -1800)})
         ] do
       assert M15Signal.assess(invalid, @bear, @now).blocked
     end
+  end
+
+  test "30 closed continuous candles are enough for analysis" do
+    refute M15Signal.assess(Enum.take(bars(:sell), -30), @bear, @now).blocked
+    assert M15Signal.assess(Enum.take(bars(:sell), -29), @bear, @now).blocked
   end
 
   test "invalid OHLC or provider confirmation cannot authorize entry" do

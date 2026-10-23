@@ -6,7 +6,7 @@ Chỉ gửi khi quyết định cuối cùng (`cfd_plan.action`) là `buy` hoặ
 không có lỗi AI, và toàn bộ nhận định vượt qua kiểm tra tiếng Việt/chống lặp
 trước khi rút gọn tin nhắn. `wait` / “Đứng ngoài” không gửi, kể cả AI đề xuất Buy/Sell
 nhưng điều kiện kiểm soát rủi ro đã khóa lệnh.
-Nhận định hết chu kỳ M15 không được gửi. Khi chưa cấu hình `GOLD_API_KEY`, nguồn lỗi hoặc chưa đủ 50 nến M15/H1,
+Nhận định hết chu kỳ M15 không được gửi. Khi chưa cấu hình `GOLD_API_KEY`, nguồn lỗi hoặc chưa đủ 30 nến M15/H1,
 tín hiệu giữ `wait`, nên chưa có thông báo Buy/Sell. OHLC được đồng bộ tự động
 35 giây sau các mốc đóng nến; xem tiến độ trên giao diện và hướng dẫn trong [AI.md](AI.md).
 
