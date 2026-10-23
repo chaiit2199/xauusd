@@ -13,7 +13,7 @@ defmodule GoldBackend.Services.InsightCache do
 
   alias GoldBackendWeb.TradingController
   @table __MODULE__
-  def start_link(_), do: GenServer.start_link(__MODULE__, %{}, name: __MODULE__)
+  def start_link(opts), do: GenServer.start_link(__MODULE__, opts, name: __MODULE__)
   def interval_seconds, do: 300
 
   def fresh?(%DateTime{} = at, action, current, now \\ DateTime.utc_now()),
@@ -83,10 +83,39 @@ defmodule GoldBackend.Services.InsightCache do
   end
 
   @impl true
-  def init(_) do
+  def init(opts) do
     :ets.new(@table, [:named_table, :protected, :set, read_concurrency: true])
     timer = schedule_refresh(DateTime.utc_now())
-    {:ok, %{job: nil, job_slot: nil, last_slot: nil, timer: timer}}
+
+    state = %{
+      job: nil,
+      job_slot: nil,
+      last_slot: nil,
+      timer: timer,
+      compute: Keyword.get(opts, :compute, &compute/1),
+      restore: Keyword.get(opts, :restore, &TradingController.stored_snapshot/0)
+    }
+
+    if Keyword.get(opts, :bootstrap, true),
+      do: {:ok, state, {:continue, :bootstrap}},
+      else: {:ok, state}
+  end
+
+  @impl true
+  def handle_continue(:bootstrap, state) do
+    # Database-only restore: no provider, calendar, AI or notification calls.
+    try do
+      case state.restore.() do
+        {:ok, snapshot} -> :ets.insert(@table, {:snapshot, snapshot})
+        {:error, reason} -> Logger.info("No stored market snapshot: #{inspect(reason)}")
+      end
+    rescue
+      error -> Logger.warning("Could not restore market snapshot: #{Exception.message(error)}")
+    end
+
+    # Do not wait for the next five-minute boundary after a restart.
+    send(self(), :refresh)
+    {:noreply, state}
   end
 
   @impl true
@@ -99,10 +128,8 @@ defmodule GoldBackend.Services.InsightCache do
     if state.job || state.last_slot == slot do
       {:noreply, state}
     else
-      task =
-        Task.Supervisor.async_nolink(GoldBackend.TaskSupervisor, fn ->
-          compute(slot)
-        end)
+      compute_fn = Map.get(state, :compute, &compute/1)
+      task = Task.Supervisor.async_nolink(GoldBackend.TaskSupervisor, fn -> compute_fn.(slot) end)
 
       # The market-data worker never waits for AI; bound provider and DB latency.
       Process.send_after(self(), {:timeout, task.ref}, 120_000)

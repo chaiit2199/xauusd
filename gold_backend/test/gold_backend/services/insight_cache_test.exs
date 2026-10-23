@@ -87,7 +87,7 @@ defmodule GoldBackend.Services.InsightCacheTest do
   end
 
   test "async commentary preserves a published ticket, survives refresh, and ignores old candles" do
-    pid = start_supervised!(InsightCache)
+    pid = start_supervised!({InsightCache, bootstrap: false})
     now = DateTime.utc_now()
     candle = CandleClock.closed_at(now) |> DateTime.to_iso8601()
 
@@ -126,8 +126,54 @@ defmodule GoldBackend.Services.InsightCacheTest do
     assert InsightCache.snapshot().ai_error == "timeout"
   end
 
+  test "startup restores stored data and refreshes immediately even when the provider fails" do
+    parent = self()
+    now = DateTime.utc_now()
+
+    saved = %{
+      analysis_candle_closed_at: DateTime.to_iso8601(CandleClock.closed_at(now)),
+      ai_next_analysis_at: DateTime.to_iso8601(CandleClock.next_close(now)),
+      cfd_plan: %{action: "wait"},
+      snapshot_origin: "database",
+      current_price: "4100.0"
+    }
+
+    restore = fn ->
+      send(parent, :restored)
+      {:ok, saved}
+    end
+
+    compute = fn _ ->
+      send(parent, :refreshed_immediately)
+      {:error, :provider_offline}
+    end
+
+    pid = start_supervised!({InsightCache, restore: restore, compute: compute})
+    assert_receive :restored
+    assert_receive :refreshed_immediately, 1000
+    :sys.get_state(pid)
+    assert InsightCache.snapshot().current_price == "4100.0"
+    assert InsightCache.snapshot().snapshot_origin == "database"
+    assert InsightCache.snapshot().cfd_plan.action == "wait"
+  end
+
+  test "failed restore still triggers immediate refresh" do
+    parent = self()
+
+    start_supervised!(
+      {InsightCache,
+       restore: fn -> {:error, :no_rows} end,
+       compute: fn _ ->
+         send(parent, :refresh_without_rows)
+         {:error, :provider_offline}
+       end}
+    )
+
+    assert_receive :refresh_without_rows, 1000
+  end
+
   test "peek reads the snapshot without waiting for the GenServer mailbox" do
-    pid = start_supervised!(InsightCache)
+    pid = start_supervised!({InsightCache, bootstrap: false})
     :sys.suspend(pid)
 
     try do

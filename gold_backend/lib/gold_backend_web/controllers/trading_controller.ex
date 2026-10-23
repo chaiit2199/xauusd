@@ -88,13 +88,20 @@ defmodule GoldBackendWeb.TradingController do
   def analyze_and_get_data(conn, _params), do: cached_response(conn)
 
   defp cached_response(conn) do
-    case InsightCache.snapshot() do
+    snapshot =
+      InsightCache.snapshot() ||
+        case stored_snapshot() do
+          {:ok, data} -> data
+          _ -> nil
+        end
+
+    case snapshot do
       nil ->
         conn
         |> put_status(503)
         |> json(%{
           status: "pending",
-          message: "Đang chờ lần kiểm tra tiếp theo sau mỗi 5 phút."
+          message: "Chưa có dữ liệu thị trường đã lưu để hiển thị; đang tải dữ liệu đầu tiên."
         })
 
       data ->
@@ -108,6 +115,31 @@ defmodule GoldBackendWeb.TradingController do
           })
 
         json(conn, %{status: "success", data: data})
+    end
+  end
+
+  def stored_snapshot(opts \\ []) do
+    opts =
+      opts
+      |> Keyword.put(:stored_only, true)
+      |> Keyword.put(:news_two_days, true)
+      |> Keyword.delete(:quote)
+
+    with {:ok, context} <- build_context(opts) do
+      stamp = DateTime.to_iso8601(context.latest.timestamp)
+
+      reason =
+        "Đang hiển thị dữ liệu đã lưu lúc #{stamp}; chờ kiểm tra giá và lịch tin mới trước khi phát phiếu."
+
+      snapshot = rule_snapshot(context, reason)
+
+      {:ok,
+       Map.merge(snapshot, %{
+         snapshot_origin: "database",
+         rule_commentary:
+           reason <> "\n" <> Map.get(context.plan, :rule_commentary, context.plan.summary),
+         ai_status: "not_requested"
+       })}
     end
   end
 
@@ -242,7 +274,12 @@ defmodule GoldBackendWeb.TradingController do
 
       zones = if location_h1 == [], do: [], else: Zoi.build(location_h1, location_i, trigger_open)
       m15_setup = SetupEngine.assess(m15, bias, zones, now)
-      calendar = EconomicCalendar.snapshot(now)
+
+      calendar =
+        if Keyword.get(opts, :stored_only, false),
+          do: %{status: "unavailable", events: []},
+          else: EconomicCalendar.snapshot(now)
+
       events = calendar.events
       blocking = EconomicCalendar.blocking(events, now)
       news_bias = NewsBias.assess(news, now)
