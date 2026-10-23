@@ -12,7 +12,7 @@ defmodule GoldBackend.Services.OhlcContext do
       latest_h1 = List.last(h1)
 
       ready =
-        length(h1) >= 30 and
+        length(h1) >= 50 and
           DateTime.compare(
             DateTime.add(latest_h1.open_time, 3600),
             CandleClock.closed_at(slot, 3600)

@@ -2,33 +2,39 @@ defmodule GoldBackend.Services.EconomicCalendar do
   @moduledoc """
   High-impact USD events for the next day.
 
-  A release inside the 30 minutes before or after the print blocks a new
+  A release inside the 15 minutes before or 30 minutes after the print blocks a new
   XAUUSD CFD idea. A failed download does not invent events.
   """
 
   @url "https://nfs.faireconomy.media/ff_calendar_thisweek.json"
-  @titles ~r/cpi|nfp|non-farm|nonfarm|fomc|fed |powell|payroll|ppi|gdp|retail sales|jobless|interest rate|unemployment/i
+  def upcoming_usd(now \\ DateTime.utc_now(), within_hours \\ 24),
+    do: snapshot(now, within_hours).events
 
-  def upcoming_usd(now \\ DateTime.utc_now(), within_hours \\ 24) do
-    case fetch() do
+  def snapshot(now, within_hours \\ 24, opts \\ []) do
+    fetcher = Keyword.get(opts, :fetch, &fetch/0)
+
+    case fetcher.() do
       {:ok, events} ->
-        horizon = DateTime.add(now, within_hours * 3600, :second)
-        earliest = DateTime.add(now, -1_800, :second)
+        horizon = DateTime.add(now, within_hours * 3600)
+        earliest = DateTime.add(now, -1800)
 
-        events
-        |> Enum.filter(&usd_high_impact?(&1, earliest, horizon))
-        |> Enum.sort_by(& &1.time, DateTime)
-        |> Enum.take(6)
+        %{
+          status: "ok",
+          events:
+            events
+            |> Enum.filter(&usd_high_impact?(&1, earliest, horizon))
+            |> Enum.sort_by(& &1.time, DateTime)
+        }
 
-      :error ->
-        []
+      _ ->
+        %{status: "unavailable", events: []}
     end
   end
 
   def blocking(events, now \\ DateTime.utc_now()) do
     Enum.find(events, fn event ->
       delta = DateTime.diff(event.time, now, :second)
-      delta >= -1_800 and delta <= 1_800
+      delta >= -1_800 and delta <= 900
     end)
   end
 
@@ -80,7 +86,6 @@ defmodule GoldBackend.Services.EconomicCalendar do
   defp usd_high_impact?(event, earliest, horizon) do
     event.country in ["USD", "All"] and
       event.impact == "High" and
-      Regex.match?(@titles, event.title) and
       DateTime.compare(event.time, earliest) != :lt and
       DateTime.compare(event.time, horizon) != :gt
   end

@@ -86,6 +86,46 @@ defmodule GoldBackend.Services.InsightCacheTest do
     end
   end
 
+  test "async commentary preserves a published ticket, survives refresh, and ignores old candles" do
+    pid = start_supervised!(InsightCache)
+    now = DateTime.utc_now()
+    candle = CandleClock.closed_at(now) |> DateTime.to_iso8601()
+
+    snapshot = %{
+      analysis_candle_closed_at: candle,
+      ai_next_analysis_at: DateTime.to_iso8601(CandleClock.next_close(now)),
+      cfd_plan: %{action: "buy", entry: 100.0, stop_loss: 95.0, take_profit: 110.0},
+      ai_status: "pending",
+      ai_action: nil,
+      ai_insight: nil,
+      ai_error: nil
+    }
+
+    publish = fn data ->
+      ref = make_ref()
+
+      :sys.replace_state(pid, fn state ->
+        %{state | job: %{ref: ref}, job_slot: CandleClock.closed_at(now)}
+      end)
+
+      send(pid, {ref, {:ok, data}})
+      :sys.get_state(pid)
+    end
+
+    publish.(snapshot)
+    assert InsightCache.snapshot().cfd_plan.action == "buy"
+    GenServer.cast(pid, {:commentary, candle, "buy", {:error, "timeout"}})
+    :sys.get_state(pid)
+    assert InsightCache.snapshot().cfd_plan == snapshot.cfd_plan
+    assert InsightCache.snapshot().ai_error == "timeout"
+    publish.(snapshot)
+    assert InsightCache.snapshot().ai_error == "timeout"
+    old = DateTime.add(CandleClock.closed_at(now), -900) |> DateTime.to_iso8601()
+    GenServer.cast(pid, {:commentary, old, "buy", {:error, "old failure"}})
+    :sys.get_state(pid)
+    assert InsightCache.snapshot().ai_error == "timeout"
+  end
+
   test "peek reads the snapshot without waiting for the GenServer mailbox" do
     pid = start_supervised!(InsightCache)
     :sys.suspend(pid)

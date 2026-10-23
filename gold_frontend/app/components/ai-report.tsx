@@ -12,6 +12,8 @@ function renderInsight(text: string) {
 
 type AiReportProps = {
   insight: string | null;
+  ruleCommentary?: string;
+  aiStatus?: string;
   error: string | null;
   pending: boolean;
   elapsed: number;
@@ -23,6 +25,8 @@ type AiReportProps = {
 
 export function AiReport({
   insight,
+  ruleCommentary,
+  aiStatus,
   error,
   pending,
   elapsed,
@@ -36,7 +40,7 @@ export function AiReport({
   return (
     <section className="panel ai-panel">
       <div className="panel-head">
-        <h2>Nhận định AI · H1 → M15 · {cadence} phút</h2>
+        <h2>Phân tích thị trường · H1 → M15 · {cadence} phút</h2>
         <p>
           {pending
             ? `Đang phân tích giá, chỉ báo và tin tức… ${elapsed} giây`
@@ -50,6 +54,7 @@ export function AiReport({
         </p>
       </div>
 
+      {ruleCommentary ? <div className="ai-body"><strong>Phân tích theo rule</strong><p>{ruleCommentary}</p></div> : null}
       {newsTone ? <p className="ai-meta">{newsTone}</p> : null}
 
       {pending ? (
@@ -58,12 +63,11 @@ export function AiReport({
 
       {error ? <p className="ai-error">{error}</p> : null}
 
-      {insight ? <div className="ai-body">{renderInsight(insight)}</div> : null}
+      {insight ? <div className="ai-body"><strong>Bình luận AI</strong><p>{renderInsight(insight)}</p></div> : null}
 
       {!pending && !error && !insight ? (
         <p className="empty">
-          Đang chờ nhận định đầu tiên. Phân tích sẽ tự động cập nhật
-          theo giá, chỉ báo kỹ thuật và tin tức.
+          {aiStatus === "pending" ? "Rule đã phát phiếu; AI đang bổ sung bình luận." : "AI được gọi khi rule có phiếu BUY/SELL. Phân tích rule vẫn cập nhật khi đứng ngoài."}
         </p>
       ) : null}
     </section>

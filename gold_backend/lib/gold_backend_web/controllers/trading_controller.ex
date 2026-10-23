@@ -6,12 +6,13 @@ defmodule GoldBackendWeb.TradingController do
   alias GoldBackend.Repo
 
   alias GoldBackend.Services.{
-    AiDecision,
     CandleClock,
     CandleStore,
     GoldOhlc,
     OhlcContext,
-    M15Signal,
+    BiasEngine,
+    SetupEngine,
+    Zoi,
     EconomicCalendar,
     Indicators,
     NewsBias,
@@ -111,73 +112,42 @@ defmodule GoldBackendWeb.TradingController do
   end
 
   def rule_snapshot(context, reason \\ nil) do
-    rule_action = context.plan.action
-    reason = reason || context.plan.block_reason || "Chưa có tín hiệu đủ điều kiện."
+    at = Map.get(context, :analysis_at, DateTime.utc_now())
 
     plan =
-      Map.merge(context.plan, %{
-        action: "wait",
-        action_label: "Đứng ngoài",
-        block_reason: reason,
-        summary: reason
-      })
+      if reason,
+        do:
+          Map.merge(context.plan, %{
+            action: "wait",
+            action_label: "Đứng ngoài",
+            block_reason: reason,
+            summary: reason
+          }),
+        else: context.plan
 
     context = %{context | plan: plan}
 
     Map.merge(public_snapshot(context), %{
-      rule_action: rule_action,
+      rule_action: plan.action,
+      rule_commentary: Map.get(plan, :rule_commentary, plan.summary),
       ai_action: nil,
       ai_insight: nil,
       ai_error: nil,
-      ai_cached_at: DateTime.utc_now() |> DateTime.truncate(:second) |> DateTime.to_iso8601(),
+      ai_status: if(plan.action in ["buy", "sell"], do: "pending", else: "not_requested"),
+      ai_cached_at: DateTime.to_iso8601(at),
       ai_ttl_seconds: InsightCache.interval_seconds(),
-      analysis_candle_closed_at: DateTime.to_iso8601(CandleClock.closed_at(context.analysis_at)),
-      ai_next_analysis_at: DateTime.to_iso8601(CandleClock.next_close(context.analysis_at))
+      analysis_candle_closed_at: DateTime.to_iso8601(CandleClock.closed_at(at)),
+      ai_next_analysis_at: DateTime.to_iso8601(CandleClock.next_close(at))
     })
   end
 
   def analysis_snapshot(context, action, insight, error) do
-    rule_action = context.plan.action
+    snapshot = rule_snapshot(context)
 
-    {action, insight, error} =
-      if is_nil(error) do
-        case AiDecision.parse(%{"action" => to_string(action), "reason" => insight}) do
-          {:ok, valid_action, valid_reason} -> {valid_action, valid_reason, nil}
-          {:error, reason} -> {:wait, "Không có quyết định AI hợp lệ; tiếp tục theo dõi.", reason}
-        end
-      else
-        {:wait, "Không có quyết định AI hợp lệ; tiếp tục theo dõi.", error}
-      end
-
-    plan =
-      TradePlan.build(context.indicators, context.plan.entry,
-        ai_action: action,
-        warmup: context.warmup,
-        warmup_detail: context.warmup_detail,
-        blocking_event: EconomicCalendar.blocking(context.events),
-        news_bias: context.news_bias,
-        price_action: context.price_action,
-        m15_setup: Map.get(context, :m15_setup)
-      )
-
-    context = %{context | plan: plan}
-
-    Map.merge(public_snapshot(context), %{
-      rule_action: rule_action,
-      ai_action: if(is_nil(error), do: Atom.to_string(action), else: nil),
-      ai_insight: insight,
-      ai_error: error,
-      ai_cached_at: DateTime.utc_now() |> DateTime.truncate(:second) |> DateTime.to_iso8601(),
-      ai_ttl_seconds: InsightCache.interval_seconds(),
-      analysis_candle_closed_at:
-        DateTime.to_iso8601(
-          CandleClock.closed_at(Map.get(context, :analysis_at, DateTime.utc_now()))
-        ),
-      ai_next_analysis_at:
-        DateTime.to_iso8601(
-          CandleClock.next_close(Map.get(context, :analysis_at, DateTime.utc_now()))
-        )
-    })
+    GoldBackend.Services.InsightCache.apply_commentary(
+      snapshot,
+      {if(error, do: :error, else: :ok), action, insight, error}
+    )
   end
 
   defp market_context(opts) do
@@ -194,6 +164,7 @@ defmodule GoldBackendWeb.TradingController do
         m15_count: length(m15),
         h1_count: length(h1),
         required: 30,
+        required_h1: 50,
         latest_m15_closed_at: if(ohlc, do: ohlc.m15_closed_at, else: nil)
       })
 
@@ -245,25 +216,44 @@ defmodule GoldBackendWeb.TradingController do
 
       {warmup, warmup_detail} =
         cond do
-          feed.error ->
-            {true, feed.error}
-
           not h1_ready ->
             {true,
-             "Đang tích lũy OHLC Gold API: M15 #{length(m15)}/30, H1 #{length(h1)}/30; cần H1 mới nhất đã đóng."}
+             feed.error ||
+               "Đang tích lũy OHLC Gold API: M15 #{length(m15)}/30, H1 #{length(h1)}/50; cần H1 mới nhất đã đóng."}
 
           true ->
             {false, nil}
         end
 
-      m15_setup = M15Signal.assess(m15, summary.indicators, now)
-      events = EconomicCalendar.upcoming_usd(now)
+      closed_h1_bars = if ohlc, do: ohlc.h1, else: []
+      bias = BiasEngine.assess(closed_h1_bars, now)
+      trigger_open = DateTime.add(CandleClock.closed_at(now), -900)
+
+      location_h1 =
+        Enum.filter(
+          closed_h1_bars,
+          &(DateTime.compare(DateTime.add(&1.open_time, 3600), trigger_open) != :gt)
+        )
+
+      location_i =
+        if location_h1 == [],
+          do: summary.indicators,
+          else: Indicators.summarize_candles(location_h1, 3600).indicators
+
+      zones = if location_h1 == [], do: [], else: Zoi.build(location_h1, location_i, trigger_open)
+      m15_setup = SetupEngine.assess(m15, bias, zones, now)
+      calendar = EconomicCalendar.snapshot(now)
+      events = calendar.events
       blocking = EconomicCalendar.blocking(events, now)
       news_bias = NewsBias.assess(news, now)
       price_action = recent_price_action(prices, latest, now)
 
       plan =
         TradePlan.build(summary.indicators, entry,
+          bias: bias,
+          as_of: now,
+          quote: Keyword.get(opts, :quote),
+          calendar_status: calendar.status,
           warmup: warmup,
           warmup_detail: warmup_detail,
           blocking_event: blocking,

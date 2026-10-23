@@ -22,7 +22,13 @@ export type CfdPlan = {
   market: string;
   action: "buy" | "sell" | "wait";
   action_label: string;
-  lean: "buy" | "sell";
+  lean: "buy" | "sell" | "neutral";
+  bias?: { side: "buy" | "sell" | "neutral"; reason: string; adx: number | null; slope: number | null; locked_until: string | null };
+  setup_label?: string;
+  blocking_reasons?: string[];
+  checks?: { code: string; status: "pass" | "blocked" | "unknown"; reason: string }[];
+  soft_flags?: string[];
+  spread_source?: string;
   lean_label: string;
   entry: number;
   stop_loss: number;
@@ -136,8 +142,11 @@ export type MarketBoard = {
     m15_count: number;
     h1_count: number;
     required: number;
+    required_h1?: number;
     latest_m15_closed_at: string | null;
   } | null;
+  rule_commentary?: string;
+  ai_status?: "pending" | "ready" | "error" | "not_requested";
   ai_action?: "buy" | "sell" | "wait" | null;
   ai_insight?: string | null;
   ai_error?: string | null;

@@ -13,6 +13,15 @@ defmodule GoldBackend.Services.TradePlan do
   @spread 0.40
 
   def build(indicators, entry, opts \\ []) when is_number(entry) do
+    if Keyword.has_key?(opts, :bias) do
+      GoldBackend.Services.StrategyPlan.build(indicators, entry, opts)
+    else
+      legacy_build(indicators, entry, opts)
+    end
+  end
+
+  # Kept for offline comparison of the previous strategy; production supplies :bias.
+  defp legacy_build(indicators, entry, opts) do
     entry = round2(entry)
     h1_indicators = indicators
     m15 = Keyword.get(opts, :m15_setup)

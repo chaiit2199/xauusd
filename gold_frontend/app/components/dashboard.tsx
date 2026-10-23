@@ -243,6 +243,8 @@ export function Dashboard() {
           ) : null}
 
           <AiReport
+            ruleCommentary={expired ? undefined : view.rule_commentary}
+            aiStatus={view.ai_status}
             insight={analyzing || expired ? null : insight}
             error={analyzing ? null : expired ? view.ai_error ?? null : insightError}
             pending={analyzing}
@@ -261,7 +263,7 @@ export function Dashboard() {
             <p className="empty">{expired ? view.ai_error : view.m15_setup.reason}</p>
             {view.ohlc_feed ? <p className="basis">
               Nguồn OHLC: <a href="https://gold-api.com" target="_blank" rel="noreferrer">Gold API</a>
-              {` · M15: ${view.ohlc_feed.m15_count}/${view.ohlc_feed.required} · H1: ${view.ohlc_feed.h1_count}/${view.ohlc_feed.required} nến`}
+              {` · M15: ${view.ohlc_feed.m15_count}/${view.ohlc_feed.required} · H1: ${view.ohlc_feed.h1_count}/${view.ohlc_feed.required_h1 ?? view.ohlc_feed.required} nến`}
               {view.ohlc_feed.error ? ` · ${view.ohlc_feed.error}` : null}
             </p> : null}
             <p className="basis">H1 định hướng · Chỉ đánh giá nến đã đóng · Mốc :00 / :15 / :30 / :45</p>

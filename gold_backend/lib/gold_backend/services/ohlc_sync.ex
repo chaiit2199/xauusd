@@ -84,7 +84,7 @@ defmodule GoldBackend.Services.OhlcSync do
           []
 
         missing_h1 != nil and
-            (length(h1) < 30 or not MapSet.member?(h1_times, DateTime.to_unix(last_h1))) ->
+            (length(h1) < 50 or not MapSet.member?(h1_times, DateTime.to_unix(last_h1))) ->
           [{3600, DateTime.add(last_h1, -missing_h1 * 3600)}]
 
         missing_m15 != nil ->

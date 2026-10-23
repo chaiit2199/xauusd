@@ -66,7 +66,7 @@ defmodule GoldBackend.Services.AiDecisionTest do
 
   test "wait message includes the reason but no order levels" do
     snapshot = %{
-      cfd_plan: %{action: "wait", entry: 2000},
+      cfd_plan: %{action: "wait", entry: 2000, block_reason: "Chưa đủ tín hiệu"},
       ai_insight: "Chưa đủ tín hiệu",
       ai_error: nil,
       ai_cached_at: "2026-10-22T10:00:00Z"

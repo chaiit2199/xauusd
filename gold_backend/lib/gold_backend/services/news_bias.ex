@@ -130,10 +130,10 @@ defmodule GoldBackend.Services.NewsBias do
     impact =
       cond do
         trade_block ->
-          " Có tin USD tác động mạnh mới xuất hiện — khóa lệnh 90 phút để tránh biến động sau tin."
+          " Có headline USD tác động mạnh mới xuất hiện; cần đối chiếu lịch và điều kiện khớp lệnh."
 
         high_impact ->
-          " Có tin USD tác động mạnh nhưng đã ngoài cửa sổ khóa lệnh 90 phút."
+          " Có headline USD tác động mạnh nhưng đã ngoài cửa sổ theo dõi 90 phút."
 
         true ->
           ""

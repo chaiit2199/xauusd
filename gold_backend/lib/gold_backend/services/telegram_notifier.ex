@@ -28,12 +28,11 @@ defmodule GoldBackend.Services.TelegramNotifier do
   def notify(snapshot, opts \\ [])
 
   def notify(%{cfd_plan: %{action: "wait"}}, _opts), do: :ok
-  def notify(%{ai_error: error}, _opts) when not is_nil(error), do: :ok
 
   def notify(%{cfd_plan: %{action: action}} = snapshot, opts)
       when action in ["buy", "sell"] do
     with :ok <- validate_slot(snapshot),
-         :ok <- validate_insight(snapshot),
+         :ok <- validate_ticket(snapshot),
          :ok <- validate_config() do
       config = Application.get_env(:gold_backend, :telegram, [])
       token = config |> Keyword.fetch!(:bot_token) |> String.trim()
@@ -95,12 +94,20 @@ defmodule GoldBackend.Services.TelegramNotifier do
 
   defp validate_slot(_), do: :ok
 
-  defp validate_insight(snapshot) do
-    case AiDecision.validate_reason(Map.get(snapshot, :ai_insight)) do
-      {:ok, _} -> :ok
-      {:error, reason} -> failure("Không gửi nhận định AI không hợp lệ: " <> reason)
-    end
+  defp validate_ticket(%{
+         cfd_plan: %{action: side, entry: entry, stop_loss: stop, take_profit: target}
+       })
+       when is_number(entry) and is_number(stop) and is_number(target) do
+    valid =
+      entry > 0 and stop > 0 and target > 0 and
+        if side == "buy",
+          do: stop < entry and entry < target,
+          else: target < entry and entry < stop
+
+    if valid, do: :ok, else: failure("Mức giá phiếu không hợp lệ.")
   end
+
+  defp validate_ticket(_), do: failure("Thiếu mức giá phiếu.")
 
   defp present?(value), do: is_binary(value) and String.trim(value) != ""
 
@@ -140,16 +147,13 @@ defmodule GoldBackend.Services.TelegramNotifier do
       end
 
     reason =
-      cond do
-        is_binary(Map.get(snapshot, :ai_error)) ->
-          "Không có quyết định AI hợp lệ: #{snapshot.ai_error}"
+      case AiDecision.validate_reason(Map.get(snapshot, :ai_insight)) do
+        {:ok, text} ->
+          short_reason(text)
 
-        plan.action == "wait" and is_binary(Map.get(plan, :block_reason)) and
-            Map.get(snapshot, :ai_action) != "wait" ->
-          plan.block_reason
-
-        true ->
-          short_reason(Map.get(snapshot, :ai_insight))
+        _ ->
+          Map.get(plan, :block_reason) ||
+            Map.get(plan, :summary, "Phiếu được xác nhận bởi rule; AI chỉ bổ sung bình luận.")
       end
 
     (["Khuyến nghị: #{label}"] ++ levels ++ ["Lý do: #{evidence}#{reason}"])

@@ -39,28 +39,24 @@ defmodule GoldBackend.Services.AiReasonQualityTest do
     assert {:ok, ^reason} = AiDecision.validate_reason(reason)
   end
 
-  test "invalid rationale is never sent even when a snapshot claims a valid trade" do
+  test "invalid AI rationale is omitted from the rule notification" do
     snapshot = %{
       cfd_plan: %{action: "sell", entry: 4078.7, take_profit: 4044.14, stop_loss: 4095.98},
       ai_insight: @reported,
       ai_error: nil
     }
 
-    assert {:error, error} =
-             TelegramNotifier.notify(snapshot,
-               http_post: fn _, _, _, _ -> flunk("must not send") end
-             )
-
-    assert error =~ "lặp nội dung"
+    text = TelegramNotifier.format_message(snapshot)
+    assert text =~ "Khuyến nghị: Bán"
+    refute text =~ "diagonal"
   end
 
-  test "snapshot construction blocks bad rationale instead of publishing a sell" do
+  test "bad rationale does not veto the rule sell" do
     snapshot = TradingController.analysis_snapshot(context(), :sell, @reported, nil)
-    assert snapshot.cfd_plan.action == "wait"
+    assert snapshot.cfd_plan.action == "sell"
     assert snapshot.ai_action == nil
     assert snapshot.ai_error =~ "lặp nội dung"
-    refute snapshot.ai_insight =~ "diagonal"
-    refute snapshot.ai_insight =~ "principal"
+    assert snapshot.ai_insight == nil
   end
 
   test "a valid rationale preserves the action and computed levels" do
@@ -78,9 +74,10 @@ defmodule GoldBackend.Services.AiReasonQualityTest do
   test "a valid AI sell still becomes wait when the entry violates the pullback rules" do
     context = context()
     context = %{context | indicators: %{context.indicators | sma_20: 4106.66, rsi_14: 36.63}}
+    context = %{context | plan: TradePlan.build(context.indicators, context.plan.entry)}
     snapshot = TradingController.analysis_snapshot(context, :sell, @valid, nil)
-    assert snapshot.ai_error == nil
-    assert snapshot.ai_action == "sell"
+    assert snapshot.ai_error != nil
+    assert snapshot.ai_action == nil
     assert snapshot.cfd_plan.action == "wait"
     assert snapshot.cfd_plan.entry_guard.blocked
     assert snapshot.cfd_plan.block_reason =~ "hơn 2 ATR"
@@ -99,11 +96,11 @@ defmodule GoldBackend.Services.AiReasonQualityTest do
         quote: fn -> flunk("must not request quote") end
       )
 
-    assert snapshot.cfd_plan.action == "wait"
-    assert snapshot.cfd_plan.block_reason =~ "không xác nhận"
+    assert snapshot.cfd_plan.action == "sell"
+    assert snapshot.ai_error =~ "khác quyết định"
   end
 
-  test "an expired entry is blocked after AI agrees" do
+  test "AI enrichment cannot change the published price levels" do
     context = Map.put(context(), :analysis_at, DateTime.utc_now())
 
     snapshot =
@@ -111,8 +108,7 @@ defmodule GoldBackend.Services.AiReasonQualityTest do
         quote: fn -> {:ok, %{price: 4100.0}} end
       )
 
-    assert snapshot.cfd_plan.action == "wait"
-    assert snapshot.cfd_plan.block_reason =~ "không còn hợp lệ"
+    assert snapshot.cfd_plan == context.plan
   end
 
   defp context do

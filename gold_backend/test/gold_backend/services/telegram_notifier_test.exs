@@ -49,6 +49,12 @@ defmodule GoldBackend.Services.TelegramNotifierTest do
 
     for {action, label} <- [{"buy", "Mua"}, {"sell", "Bán"}] do
       snapshot = put_in(@snapshot, [:cfd_plan, :action], action)
+
+      snapshot =
+        if action == "sell",
+          do: %{snapshot | cfd_plan: %{snapshot.cfd_plan | stop_loss: 2010, take_profit: 1980}},
+          else: snapshot
+
       assert :ok = TelegramNotifier.notify(snapshot, http_post: post)
 
       assert_received {:sent, "https://api.telegram.org/bottest-token/sendMessage", payload,
@@ -73,7 +79,7 @@ defmodule GoldBackend.Services.TelegramNotifierTest do
     end
   end
 
-  test "wait, blocked trades and AI errors never send or require Telegram configuration" do
+  test "wait and blocked trades never send or require Telegram configuration" do
     Application.put_env(:gold_backend, :telegram, [])
     wait = %{cfd_plan: %{action: "wait"}, ai_error: nil}
 
@@ -81,8 +87,7 @@ defmodule GoldBackend.Services.TelegramNotifierTest do
       wait,
       Map.put(wait, :ai_action, "buy"),
       Map.put(wait, :ai_action, "sell"),
-      Map.put(wait, :ai_error, "Ollama quá thời gian"),
-      Map.put(@snapshot, :ai_error, "Nhận định không hợp lệ")
+      Map.put(wait, :ai_error, "Ollama quá thời gian")
     ]
 
     log =
@@ -96,6 +101,20 @@ defmodule GoldBackend.Services.TelegramNotifierTest do
       end)
 
     assert log == ""
+  end
+
+  test "rule tickets send even with missing or failed AI" do
+    post = fn _, body, _, _ ->
+      assert Jason.decode!(body)["text"] =~ "Giá vào lệnh:"
+      {:ok, %HTTPoison.Response{status_code: 200, body: ~s({"ok":true})}}
+    end
+
+    for error <- [nil, "AI timeout"] do
+      assert :ok =
+               TelegramNotifier.notify(%{@snapshot | ai_insight: nil, ai_error: error},
+                 http_post: post
+               )
+    end
   end
 
   test "Telegram API rejection is returned with actionable diagnostics and secrets redacted" do

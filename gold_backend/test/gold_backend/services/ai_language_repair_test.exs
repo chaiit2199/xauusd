@@ -35,9 +35,9 @@ defmodule GoldBackend.Services.AiLanguageRepairTest do
       request = Jason.decode!(body)
       send(self(), {:request, request, options})
 
-      case get_in(request, ["format", "properties", "action", "enum"]) do
-        ["buy", "sell", "wait"] -> response("wait", @english)
-        ["wait"] -> response("wait", @vietnamese)
+      case String.starts_with?(request["prompt"], "Translate") do
+        false -> response("wait", @english)
+        true -> response("wait", @vietnamese)
       end
     end
 
@@ -94,8 +94,8 @@ defmodule GoldBackend.Services.AiLanguageRepairTest do
       post = fn _, body, _, _ ->
         send(self(), :called)
 
-        case get_in(Jason.decode!(body), ["format", "properties", "action", "enum"]) do
-          ["wait"] -> response("wait", repaired)
+        case String.starts_with?(Jason.decode!(body)["prompt"], "Translate") do
+          true -> response("wait", repaired)
           _ -> response("wait", "Vàng. " <> @english)
         end
       end
@@ -131,8 +131,8 @@ defmodule GoldBackend.Services.AiLanguageRepairTest do
 
   test "a translation that changes action is rejected", %{context: context} do
     post = fn _, body, _, _ ->
-      case get_in(Jason.decode!(body), ["format", "properties", "action", "enum"]) do
-        ["wait"] -> response("buy", @vietnamese)
+      case String.starts_with?(Jason.decode!(body)["prompt"], "Translate") do
+        true -> response("buy", @vietnamese)
         _ -> response("wait", @english)
       end
     end
@@ -168,8 +168,8 @@ defmodule GoldBackend.Services.AiLanguageRepairTest do
     Application.put_env(:gold_backend, :ollama, timeout_ms: 100, translation_timeout_ms: 300)
 
     post = fn _, body, _, options ->
-      case get_in(Jason.decode!(body), ["format", "properties", "action", "enum"]) do
-        ["wait"] ->
+      case String.starts_with?(Jason.decode!(body)["prompt"], "Translate") do
+        true ->
           send(self(), {:translation_timeout, options[:recv_timeout]})
           response("wait", @vietnamese)
 
@@ -187,8 +187,8 @@ defmodule GoldBackend.Services.AiLanguageRepairTest do
     post = fn _, body, _, _ ->
       send(self(), :called)
 
-      case get_in(Jason.decode!(body), ["format", "properties", "action", "enum"]) do
-        ["wait"] -> {:error, %HTTPoison.Error{reason: :timeout}}
+      case String.starts_with?(Jason.decode!(body)["prompt"], "Translate") do
+        true -> {:error, %HTTPoison.Error{reason: :timeout}}
         _ -> response("wait", @english)
       end
     end
@@ -255,8 +255,8 @@ defmodule GoldBackend.Services.AiLanguageRepairTest do
     context: context
   } do
     post = fn _, body, _, _ ->
-      case get_in(Jason.decode!(body), ["format", "properties", "action", "enum"]) do
-        ["wait"] ->
+      case String.starts_with?(Jason.decode!(body)["prompt"], "Translate") do
+        true ->
           response("wait", @vietnamese)
 
         _ ->

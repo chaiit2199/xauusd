@@ -199,8 +199,8 @@ defmodule GoldBackend.Services.OhlcSyncTest do
     assert OhlcSync.plan(m15, h1, [], DateTime.add(@slot, 300), DateTime.add(@now, 300)) == []
   end
 
-  test "repair M15 gaps as soon as 30 H1 candles are ready" do
-    h1 = bars(~U[2026-10-22 15:00:00Z], 3600, 30)
+  test "repair M15 gaps as soon as 50 H1 candles are ready" do
+    h1 = bars(~U[2026-10-22 15:00:00Z], 3600, 50)
     m15 = [%{open_time: ~U[2026-10-22 15:00:00Z]}]
     assert OhlcSync.plan(m15, h1, [], @slot, @now) == [{900, ~U[2026-10-22 14:45:00Z]}]
   end
@@ -212,8 +212,8 @@ defmodule GoldBackend.Services.OhlcSyncTest do
     forming_h1 = %{List.last(h1) | open_time: ~U[2026-10-22 15:00:00Z], close: 9999.0}
     data = OhlcContext.build(m15 ++ [forming_m15], h1 ++ [forming_h1], @slot)
     assert data.h1_ready
-    assert OhlcContext.build(m15, Enum.take(h1, -30), @slot).h1_ready
-    refute OhlcContext.build(m15, Enum.take(h1, -29), @slot).h1_ready
+    assert OhlcContext.build(m15, Enum.take(h1, -50), @slot).h1_ready
+    refute OhlcContext.build(m15, Enum.take(h1, -49), @slot).h1_ready
     assert data.summary.indicators.current_price == 4100.0
     assert data.summary.indicators.atr_14 == 4.0
     assert Decimal.to_float(data.latest.price) == 4100.0

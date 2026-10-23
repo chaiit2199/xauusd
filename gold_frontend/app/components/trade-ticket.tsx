@@ -5,8 +5,7 @@ type TradeTicketProps = {
   aiAction?: CfdPlan["action"] | null;
 };
 
-export function TradeTicket({ plan, aiAction }: TradeTicketProps) {
-  const adjusted = aiAction && aiAction !== plan.action;
+export function TradeTicket({ plan }: TradeTicketProps) {
 
   return (
     <section className={`ticket action-${plan.action}`} aria-labelledby="decision-title">
@@ -21,9 +20,16 @@ export function TradeTicket({ plan, aiAction }: TradeTicketProps) {
           </div>
         ))}
       </div>
+      <p className="basis">Hướng H1: {plan.lean_label}</p>
+      {plan.setup_label ? <p className="basis">Setup: {plan.setup_label}</p> : null}
+      {plan.action !== "wait" ? <p className="ticket-summary">Entry {plan.entry} · SL {plan.stop_loss} · TP {plan.take_profit} · R:R sau spread {plan.reward_risk_after_spread}</p> : null}
       <p className="ticket-summary">{plan.block_reason || plan.summary}</p>
-      {adjusted ? <p className="basis">Đề xuất AI: {actionLabel(aiAction)} · Quyết định sau kiểm tra: {actionLabel(plan.action)}.</p> : null}
-      {plan.entry_guard?.blocked ? (
+      {plan.soft_flags?.map((flag) => <p className="banner warn" key={flag}>{flag}</p>)}
+      {plan.checks ? <details className="analysis-details">
+        <summary>Kiểm tra điều kiện · {plan.checks.filter((c) => c.status !== "pass").length} chưa đạt hoặc chưa xác định</summary>
+        <ul className="ticket-notes">{plan.checks.map((c) => <li key={c.code}>{c.status === "pass" ? "Đạt" : c.status === "unknown" ? "Chưa xác định" : "Chưa đạt"}: {c.reason}</li>)}</ul>
+      </details> : null}
+      {!plan.checks && plan.entry_guard?.blocked ? (
         <details className="analysis-details">
           <summary>Điều kiện chưa đạt · {plan.entry_guard.reasons.length}</summary>
           <ul className="ticket-notes">{plan.entry_guard.reasons.map((reason) => <li key={reason}>{reason}</li>)}</ul>

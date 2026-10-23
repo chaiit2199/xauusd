@@ -1,7 +1,16 @@
 defmodule GoldBackend.Services.InsightCache do
   use GenServer
   require Logger
-  alias GoldBackend.Services.{AiDecision, CandleClock, GoldOhlc, OhlcSync, TelegramNotifier}
+
+  alias GoldBackend.Services.{
+    AiDecision,
+    CandleClock,
+    GoldOhlc,
+    OhlcSync,
+    TelegramNotifier,
+    DecisionJournal
+  }
+
   alias GoldBackendWeb.TradingController
   @table __MODULE__
   def start_link(_), do: GenServer.start_link(__MODULE__, %{}, name: __MODULE__)
@@ -62,6 +71,7 @@ defmodule GoldBackend.Services.InsightCache do
       ai_action: nil,
       ai_insight: nil,
       ai_error: reason,
+      rule_commentary: reason,
       cfd_plan:
         Map.merge(data.cfd_plan, %{
           action: "wait",
@@ -91,13 +101,11 @@ defmodule GoldBackend.Services.InsightCache do
     else
       task =
         Task.Supervisor.async_nolink(GoldBackend.TaskSupervisor, fn ->
-          compute(slot, Map.get(state, :last_ai_candle))
+          compute(slot)
         end)
 
-      timeout = AiDecision.max_duration_ms()
-
-      # News crawling and headline translation run before the AI request budget.
-      Process.send_after(self(), {:timeout, task.ref}, timeout + 150_000)
+      # The market-data worker never waits for AI; bound provider and DB latency.
+      Process.send_after(self(), {:timeout, task.ref}, 120_000)
       {:noreply, %{state | job: task, job_slot: slot, last_slot: slot}}
     end
   end
@@ -106,19 +114,43 @@ defmodule GoldBackend.Services.InsightCache do
     Process.demonitor(ref, [:flush])
 
     if CandleClock.current?(CandleClock.closed_at(state.job_slot), DateTime.utc_now()) do
+      context = Map.get(snapshot, :commentary_context)
+      snapshot = Map.delete(snapshot, :commentary_context)
+
+      snapshot =
+        case :ets.lookup(@table, :snapshot) do
+          [{:snapshot, old}] ->
+            if old.analysis_candle_closed_at == snapshot.analysis_candle_closed_at and
+                 old.cfd_plan.action == snapshot.cfd_plan.action do
+              Map.merge(snapshot, Map.take(old, [:ai_insight, :ai_action, :ai_error, :ai_status]))
+            else
+              snapshot
+            end
+
+          _ ->
+            snapshot
+        end
+
       :ets.insert(@table, {:snapshot, snapshot})
 
-      Task.Supervisor.start_child(GoldBackend.TaskSupervisor, fn ->
-        TelegramNotifier.notify(snapshot)
-      end)
+      if context do
+        # Publish first. Slow AI and Telegram cannot hold up the market-data worker.
+        Task.Supervisor.start_child(GoldBackend.TaskSupervisor, fn ->
+          TelegramNotifier.notify(snapshot)
+        end)
+
+        Task.Supervisor.start_child(GoldBackend.TaskSupervisor, fn ->
+          result = AiDecision.analyze(context)
+
+          GenServer.cast(
+            __MODULE__,
+            {:commentary, snapshot.analysis_candle_closed_at, snapshot.cfd_plan.action, result}
+          )
+        end)
+      end
     else
       Logger.warning("Discarded analysis from an expired M15 candle")
     end
-
-    state =
-      if Map.get(snapshot, :ai_attempted),
-        do: Map.put(state, :last_ai_candle, snapshot.analysis_candle_closed_at),
-        else: state
 
     {:noreply, %{state | job: nil}}
   end
@@ -151,78 +183,167 @@ defmodule GoldBackend.Services.InsightCache do
           div(elem(now.microsecond, 0), 1000) + 35_000
       )
 
-  defp compute(slot, last_ai_candle) do
-    candle_slot = CandleClock.closed_at(slot)
+  defp compute(slot) do
     ohlc_feed = OhlcSync.refresh(slot)
     if ohlc_feed.error, do: Logger.warning("OHLC: #{ohlc_feed.error}")
 
     with {:ok, quote} <- GoldOhlc.quote(),
          {:ok, context} <-
            TradingController.build_context(
-             as_of: slot,
+             as_of: DateTime.utc_now(),
              ohlc_feed: ohlc_feed,
              quote: quote,
              news_two_days: true
-           ) do
-      rule_action = context.plan.action
-      candle = DateTime.to_iso8601(candle_slot)
+           ),
+         {:ok, current_quote} <- GoldOhlc.quote() do
+      context =
+        if context.plan.action in ["buy", "sell"] and not quote_valid?(context, current_quote) do
+          reason = "Giá thay đổi trong lúc phân tích; chờ chu kỳ tiếp theo."
+          check = %{code: "publication_quote", status: "blocked", reason: reason}
 
-      cond do
-        rule_action not in ["buy", "sell"] ->
-          {:ok, TradingController.rule_snapshot(context)}
+          plan =
+            Map.merge(context.plan, %{
+              action: "wait",
+              action_label: "Đứng ngoài",
+              block_reason: reason,
+              summary: reason,
+              rule_commentary: reason,
+              checks: context.plan.checks ++ [check],
+              blocking_reasons: context.plan.blocking_reasons ++ [reason]
+            })
 
-        candle == last_ai_candle ->
-          {:ok, TradingController.rule_snapshot(context, "Đã xử lý tín hiệu của nến M15 này.")}
+          %{context | plan: plan}
+        else
+          context
+        end
 
-        true ->
-          result = AiDecision.analyze(context)
-          snapshot = confirmed_snapshot(context, rule_action, result)
-          {:ok, Map.put(snapshot, :ai_attempted, true)}
+      publication_now = DateTime.utc_now()
+      event = GoldBackend.Services.EconomicCalendar.blocking(context.events, publication_now)
+      vn_hour = DateTime.add(publication_now, 7 * 3600).hour
+
+      context =
+        if context.plan.action in ["buy", "sell"] and
+             (not is_nil(event) or vn_hour < 14 or vn_hour >= 22) do
+          reason = "Cửa sổ tin hoặc phiên giao dịch đã thay đổi trước khi phát phiếu."
+          check = %{code: "publication_window", status: "blocked", reason: reason}
+
+          plan =
+            Map.merge(context.plan, %{
+              action: "wait",
+              action_label: "Đứng ngoài",
+              block_reason: reason,
+              summary: reason,
+              rule_commentary: reason,
+              checks: context.plan.checks ++ [check],
+              blocking_reasons: context.plan.blocking_reasons ++ [reason]
+            })
+
+          %{context | plan: plan}
+        else
+          context
+        end
+
+      if CandleClock.closed_at(slot) == CandleClock.closed_at(context.analysis_at) and
+           CandleClock.current?(CandleClock.closed_at(context.analysis_at), DateTime.utc_now()) do
+        case DecisionJournal.record(context) do
+          {:ok, {context, publish?}} ->
+            Logger.info(
+              "trade_checks " <>
+                Jason.encode!(%{
+                  candle: CandleClock.closed_at(context.analysis_at),
+                  version: "zoi-v1",
+                  action: context.plan.action,
+                  checks: context.plan.checks
+                })
+            )
+
+            snapshot = TradingController.rule_snapshot(context)
+
+            snapshot =
+              if not publish? and context.plan.action in ["buy", "sell"],
+                do:
+                  apply_commentary(
+                    snapshot,
+                    {:error, "Phiếu đã phát trước đó; chưa có bình luận AI trong bộ nhớ."}
+                  ),
+                else: snapshot
+
+            {:ok,
+             if(publish?, do: Map.put(snapshot, :commentary_context, context), else: snapshot)}
+
+          {:error, _} ->
+            {:error, "Không lưu được nhật ký quyết định; chưa phát phiếu."}
+        end
+      else
+        {:error, "Nến phân tích đã hết hạn."}
       end
     end
   end
 
-  def confirmed_snapshot(context, rule_action, result, opts \\ []) do
-    quote_fn = Keyword.get(opts, :quote, &GoldOhlc.quote/0)
-
-    case result do
-      {:ok, action, reason} when action in [:buy, :sell] ->
-        if Atom.to_string(action) == rule_action do
-          with {:ok, quote} <- quote_fn.(),
-               true <- quote_valid?(context, quote),
-               true <-
-                 CandleClock.current?(
-                   CandleClock.closed_at(context.analysis_at),
-                   DateTime.utc_now()
-                 ) do
-            TradingController.analysis_snapshot(context, action, reason, nil)
-          else
-            _ ->
-              TradingController.rule_snapshot(
-                context,
-                "Giá hoặc chu kỳ không còn hợp lệ sau khi AI phân tích."
-              )
-          end
-        else
-          TradingController.rule_snapshot(context, "AI không xác nhận cùng hướng với rule.")
+  @impl true
+  def handle_cast({:commentary, candle, action, result}, state) do
+    case :ets.lookup(@table, :snapshot) do
+      [{:snapshot, snapshot}] ->
+        if snapshot.analysis_candle_closed_at == candle and snapshot.cfd_plan.action == action and
+             candle == DateTime.to_iso8601(CandleClock.closed_at(DateTime.utc_now())) do
+          :ets.insert(@table, {:snapshot, apply_commentary(snapshot, result)})
         end
 
-      {:ok, _, _} ->
-        TradingController.rule_snapshot(context, "AI chọn đứng ngoài.")
-
-      {:error, error} ->
-        TradingController.rule_snapshot(context, "AI lỗi: #{error}")
-
       _ ->
-        TradingController.rule_snapshot(context, "Kết quả AI không hợp lệ.")
+        :ok
+    end
+
+    {:noreply, state}
+  end
+
+  def apply_commentary(snapshot, {:ok, action, reason}) do
+    if to_string(action) == snapshot.cfd_plan.action do
+      case AiDecision.validate_reason(reason) do
+        {:ok, text} ->
+          Map.merge(snapshot, %{
+            ai_action: to_string(action),
+            ai_insight: text,
+            ai_error: nil,
+            ai_status: "ready"
+          })
+
+        {:error, error} ->
+          apply_commentary(snapshot, {:error, error})
+      end
+    else
+      apply_commentary(
+        snapshot,
+        {:error, "Bình luận AI khác quyết định rule; không sử dụng bình luận."}
+      )
     end
   end
 
-  defp quote_valid?(context, %{price: price}) when is_number(price) do
+  def apply_commentary(snapshot, {:ok, action, reason, nil}),
+    do: apply_commentary(snapshot, {:ok, action, reason})
+
+  def apply_commentary(snapshot, {:error, _, _, error}),
+    do: apply_commentary(snapshot, {:error, error})
+
+  def apply_commentary(snapshot, {:error, error}),
+    do:
+      Map.merge(snapshot, %{ai_action: nil, ai_insight: nil, ai_error: error, ai_status: "error"})
+
+  def apply_commentary(snapshot, _),
+    do: apply_commentary(snapshot, {:error, "Bình luận AI không hợp lệ."})
+
+  # Compatibility entry point: AI results only enrich the existing rule snapshot.
+  def confirmed_snapshot(context, _rule_action, result, _opts \\ []),
+    do: TradingController.rule_snapshot(context) |> apply_commentary(result)
+
+  defp quote_valid?(context, %{price: price, timestamp: at}) when is_number(price) do
     plan = context.plan
-    # A conservative tolerance; reject stale entry and price beyond the stop.
-    abs(price - plan.entry) <= min(0.25 * context.indicators.atr_14, 1.0) and
-      if(plan.action == "buy", do: price > plan.stop_loss, else: price < plan.stop_loss)
+    age = DateTime.diff(DateTime.utc_now(), at)
+
+    age in -5..120 and abs(price - plan.entry) <= min(0.25 * context.indicators.atr_14, 1.0) and
+      if(plan.action == "buy",
+        do: price > plan.stop_loss and price < plan.take_profit,
+        else: price < plan.stop_loss and price > plan.take_profit
+      )
   end
 
   defp quote_valid?(_, _), do: false
