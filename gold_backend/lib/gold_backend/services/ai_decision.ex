@@ -31,12 +31,11 @@ defmodule GoldBackend.Services.AiDecision do
       rule_action: Map.get(context.plan, :action),
       news_status:
         if(context.news == [],
-          do: "Chưa có dữ liệu tin tức trong ngày UTC",
-          else: "Tin tức trong ngày UTC"
+          do: "Chưa có dữ liệu tin tức hôm nay và hôm qua theo UTC",
+          else: "Tin tức hôm nay và hôm qua theo UTC"
         ),
       news:
         context.news
-        |> Enum.take(6)
         |> Enum.map(fn n ->
           title = if is_binary(n.title_vi) and n.title_vi != "", do: n.title_vi, else: n.title
           %{title: title, source: Map.get(n, :source), published_at: n.published_at}

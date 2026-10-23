@@ -91,6 +91,15 @@ defmodule GoldBackendWeb.TradingController do
         })
 
       data ->
+        now = DateTime.utc_now()
+        articles = news_between(two_day_start(now), now)
+
+        data =
+          Map.merge(data, %{
+            news_3d_count: length(articles),
+            news_3d: Enum.map(articles, &article_json/1)
+          })
+
         json(conn, %{status: "success", data: data})
     end
   end
@@ -194,9 +203,8 @@ defmodule GoldBackendWeb.TradingController do
       {:error, feed.error || "Đang tích lũy OHLC M15/H1 từ Gold API."}
     else
       news =
-        if Keyword.get(opts, :news_today, false) do
-          start = now |> DateTime.to_date() |> DateTime.new!(~T[00:00:00], "Etc/UTC")
-          news_between(start, now)
+        if Keyword.get(opts, :news_two_days, false) do
+          news_between(two_day_start(now), now)
         else
           news_since(DateTime.add(now, -3, :day))
           |> NewsTranslator.ensure_vietnamese(
@@ -347,11 +355,14 @@ defmodule GoldBackendWeb.TradingController do
     |> Repo.all()
   end
 
+  defp two_day_start(now) do
+    now |> DateTime.to_date() |> Date.add(-1) |> DateTime.new!(~T[00:00:00], "Etc/UTC")
+  end
+
   defp news_between(from, now) do
     NewsArticle
     |> where([article], article.published_at >= ^from and article.published_at <= ^now)
     |> order_by(desc: :published_at)
-    |> limit(15)
     |> Repo.all()
   end
 

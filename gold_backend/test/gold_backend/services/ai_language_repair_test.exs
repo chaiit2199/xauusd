@@ -246,7 +246,7 @@ defmodule GoldBackend.Services.AiLanguageRepairTest do
     assert_received {:request, request, options}
     assert request["options"]["num_predict"] == 950
     assert request["prompt"] =~ "Tiêu đề tiếng Việt 6"
-    refute request["prompt"] =~ "Tiêu đề tiếng Việt 7"
+    assert request["prompt"] =~ "Tiêu đề tiếng Việt 15"
     refute request["prompt"] =~ "English headline"
     assert options[:timeout] == 5_000
   end

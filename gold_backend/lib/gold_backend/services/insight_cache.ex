@@ -162,7 +162,7 @@ defmodule GoldBackend.Services.InsightCache do
              as_of: slot,
              ohlc_feed: ohlc_feed,
              quote: quote,
-             news_today: true
+             news_two_days: true
            ) do
       rule_action = context.plan.action
       candle = DateTime.to_iso8601(candle_slot)

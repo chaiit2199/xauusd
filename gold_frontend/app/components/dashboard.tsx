@@ -258,10 +258,10 @@ export function Dashboard() {
 
           <div className="news-band">
             <NewsList
-              title="Tin mới nhất"
+              title="Tin mới nhất · hôm nay và hôm qua (UTC)"
               filterable
               articles={view.news_3d}
-              empty="Chưa có tin trong 3 ngày gần nhất. Chọn “Cập nhật tin” để đồng bộ."
+              empty="Chưa có tin hôm nay và hôm qua theo UTC. Chọn “Cập nhật tin” để đồng bộ."
             />
           </div>
         </>
