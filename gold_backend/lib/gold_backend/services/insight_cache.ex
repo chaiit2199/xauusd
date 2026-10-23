@@ -153,7 +153,7 @@ defmodule GoldBackend.Services.InsightCache do
 
   defp compute(slot, last_ai_candle) do
     candle_slot = CandleClock.closed_at(slot)
-    ohlc_feed = OhlcSync.refresh(candle_slot)
+    ohlc_feed = OhlcSync.refresh(slot)
     if ohlc_feed.error, do: Logger.warning("OHLC: #{ohlc_feed.error}")
 
     with {:ok, quote} <- GoldOhlc.quote(),

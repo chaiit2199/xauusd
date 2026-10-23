@@ -50,6 +50,8 @@ defmodule GoldBackend.Services.OhlcSync do
   end
 
   def plan(m15, h1, attempts, slot, now) do
+    history_tick? = DateTime.compare(slot, CandleClock.closed_at(slot)) == :eq
+    slot = CandleClock.closed_at(slot)
     last_m15 = DateTime.add(slot, -900)
     last_h1 = slot |> CandleClock.closed_at(3600) |> DateTime.add(-3600)
     m15_times = MapSet.new(Enum.map(m15, &DateTime.to_unix(&1.open_time)))
@@ -78,8 +80,11 @@ defmodule GoldBackend.Services.OhlcSync do
 
     history =
       cond do
+        not history_tick? ->
+          []
+
         missing_h1 != nil and
-            (length(h1) < 50 or not MapSet.member?(h1_times, DateTime.to_unix(last_h1))) ->
+            (length(h1) < 30 or not MapSet.member?(h1_times, DateTime.to_unix(last_h1))) ->
           [{3600, DateTime.add(last_h1, -missing_h1 * 3600)}]
 
         missing_m15 != nil ->

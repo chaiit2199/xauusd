@@ -193,6 +193,18 @@ defmodule GoldBackend.Services.OhlcSyncTest do
            ]
   end
 
+  test "five minute checks do not consume history budget between M15 closes" do
+    m15 = [%{open_time: ~U[2026-10-22 15:00:00Z]}]
+    h1 = [%{open_time: ~U[2026-10-22 14:00:00Z]}]
+    assert OhlcSync.plan(m15, h1, [], DateTime.add(@slot, 300), DateTime.add(@now, 300)) == []
+  end
+
+  test "repair M15 gaps as soon as 30 H1 candles are ready" do
+    h1 = bars(~U[2026-10-22 15:00:00Z], 3600, 30)
+    m15 = [%{open_time: ~U[2026-10-22 15:00:00Z]}]
+    assert OhlcSync.plan(m15, h1, [], @slot, @now) == [{900, ~U[2026-10-22 14:45:00Z]}]
+  end
+
   test "OHLC context uses provider closes and excludes forming H1 and M15 candles" do
     m15 = bars(@slot, 900, 50)
     h1 = bars(~U[2026-10-22 15:00:00Z], 3600, 50)
