@@ -15,6 +15,14 @@ export type Article = {
   impact?: "High" | "Medium" | "Low" | null;
 };
 
+export type RuleCheck = {
+  code: string;
+  status: "pass" | "blocked" | "unknown" | "warning";
+  reason: string;
+  required?: boolean;
+  scope?: "required" | "setup" | "advisory";
+};
+
 export type CfdPlan = {
   instrument: string;
   timeframe?: "H1" | "M15";
@@ -40,7 +48,7 @@ export type CfdPlan = {
   execution_status?: "not_tracked";
   execution_ready?: boolean;
   blocking_reasons?: string[];
-  checks?: { code: string; status: "pass" | "blocked" | "unknown"; reason: string }[];
+  checks?: RuleCheck[];
   soft_flags?: string[];
   spread_source?: string;
   lean_label: string;
@@ -125,6 +133,7 @@ export type M15Setup = {
 };
 
 export type MarketBoard = {
+  calendar_valid_until?: string | null;
   signal_valid_until?: string | null;
   next_evaluation_at?: string;
   rule_statistics?: RuleStatistics;
@@ -175,7 +184,7 @@ export type RuleStatistics = {
   version: string;
   days: number;
   evaluations: number;
-  checks: { code: string; evaluated: number; pass: number; blocked: number; unknown: number; sole_blocker: number }[];
+  checks: { code: string; evaluated: number; pass: number; blocked: number; unknown: number; warning?: number; sole_blocker: number }[];
 };
 
 export type DecisionPlan = {

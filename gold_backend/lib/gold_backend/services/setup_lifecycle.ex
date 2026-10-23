@@ -15,7 +15,7 @@ defmodule GoldBackend.Services.SetupLifecycle do
     current = candidate(m15, h1, bias, slot)
 
     if current.state == "data_unavailable" or
-         (bias.side == "neutral" and is_nil(Map.get(bias, :adx))) do
+         not StrategyPolicy.h1_ready?(bias) do
       current
     else
       candidates = [
@@ -89,8 +89,12 @@ defmodule GoldBackend.Services.SetupLifecycle do
     broken =
       Enum.any?(after_signal, fn b ->
         if setup.action == "buy",
-          do: b.low <= setup.stop_loss or b.close <= setup.zone.low,
-          else: b.high >= setup.stop_loss or b.close >= setup.zone.high
+          do:
+            b.low <= setup.stop_loss or
+              b.close <= (Map.get(setup, :invalidation_price) || setup.zone.low),
+          else:
+            b.high >= setup.stop_loss or
+              b.close >= (Map.get(setup, :invalidation_price) || setup.zone.high)
       end)
 
     target_reached =
@@ -104,7 +108,7 @@ defmodule GoldBackend.Services.SetupLifecycle do
 
     news_changed =
       Enum.any?(events, fn e ->
-        e.impact == "High" and Map.get(e, :country, "USD") == "USD" and
+        e.impact == "High" and Map.get(e, :country, "USD") in ["USD", "All"] and
           DateTime.compare(DateTime.add(e.time, -900), now) != :gt and
           DateTime.compare(DateTime.add(e.time, 1800), formed) != :lt
       end)
@@ -113,7 +117,10 @@ defmodule GoldBackend.Services.SetupLifecycle do
       DateTime.compare(now, expiry) != :lt ->
         halt(setup, "expired", "Setup đã hết hạn sau hai nến M15; chờ xác nhận mới.")
 
-      bias.side != setup.action ->
+      not StrategyPolicy.h1_ready?(bias) ->
+        halt(setup, "data_unavailable", "Chưa xác minh được dữ liệu H1; tạm dừng đánh giá setup.")
+
+      not StrategyPolicy.direction_allowed?(setup, bias) ->
         halt(setup, "invalidated", "Hướng H1 đã thay đổi; setup cũ mất hiệu lực.")
 
       broken ->

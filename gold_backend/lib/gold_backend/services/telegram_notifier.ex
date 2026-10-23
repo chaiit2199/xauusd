@@ -33,7 +33,8 @@ defmodule GoldBackend.Services.TelegramNotifier do
       when action in ["buy", "sell"] do
     with :ok <- validate_slot(snapshot),
          :ok <- validate_ticket(snapshot),
-         :ok <- validate_config() do
+         :ok <- validate_config(),
+         true <- notification_allowed?(Keyword.get(opts, :now, DateTime.utc_now())) do
       config = Application.get_env(:gold_backend, :telegram, [])
       token = config |> Keyword.fetch!(:bot_token) |> String.trim()
       chat = config |> Keyword.fetch!(:chat_id) |> String.trim()
@@ -75,10 +76,49 @@ defmodule GoldBackend.Services.TelegramNotifier do
           detail = if is_atom(reason), do: Atom.to_string(reason), else: "network_error"
           failure("Không kết nối được Telegram (#{detail}); kiểm tra mạng/DNS/TLS của container.")
       end
+    else
+      false -> :ok
+      error -> error
     end
   end
 
   def notify(_, _), do: {:error, "Snapshot không hợp lệ để gửi Telegram."}
+
+  # Notification hours do not alter the rule decision or publication history.
+  def notification_allowed?(now) do
+    window =
+      Application.get_env(
+        :gold_backend,
+        :notification_hours,
+        System.get_env("TELEGRAM_NOTIFY_HOURS", "14-22")
+      )
+
+    hour = DateTime.add(now, 7 * 3600).hour
+
+    case window do
+      "all" ->
+        true
+
+      value when is_binary(value) ->
+        case Regex.run(~r/^(\d{1,2})-(\d{1,2})$/, value) do
+          [_, first, last] ->
+            first = String.to_integer(first)
+            last = String.to_integer(last)
+
+            first in 0..23 and last in 0..24 and first != last and
+              if(first < last,
+                do: hour >= first and hour < last,
+                else: hour >= first or hour < last
+              )
+
+          _ ->
+            false
+        end
+
+      _ ->
+        false
+    end
+  end
 
   defp validate_slot(%{signal_valid_until: expiry} = snapshot) when is_binary(expiry) do
     with {:ok, at, _} <- DateTime.from_iso8601(expiry),
@@ -86,6 +126,15 @@ defmodule GoldBackend.Services.TelegramNotifier do
       validate_slot(Map.delete(snapshot, :signal_valid_until))
     else
       _ -> failure("Không gửi tín hiệu có báo giá đã quá hạn.")
+    end
+  end
+
+  defp validate_slot(%{calendar_valid_until: expiry} = snapshot) when is_binary(expiry) do
+    with {:ok, at, _} <- DateTime.from_iso8601(expiry),
+         :lt <- DateTime.compare(DateTime.utc_now(), at) do
+      validate_slot(Map.delete(snapshot, :calendar_valid_until))
+    else
+      _ -> failure("Không gửi tín hiệu khi lịch tin đã hết hiệu lực.")
     end
   end
 

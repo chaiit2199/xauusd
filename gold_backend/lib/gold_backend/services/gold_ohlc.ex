@@ -2,7 +2,7 @@ defmodule GoldBackend.Services.GoldOhlc do
   @moduledoc "Gold API range OHLC. One request per closed interval, never sampled quotes."
   @base "https://api.gold-api.com"
   @max_quote_age_seconds 120
-  @max_future_skew_seconds 60
+  @max_future_skew_seconds 5
 
   def configured? do
     case Application.get_env(:gold_backend, :gold_api_key) do

@@ -3,6 +3,29 @@ defmodule GoldBackend.Services.InsightCacheTest do
 
   alias GoldBackend.Services.{CandleClock, InsightCache}
 
+  test "expired calendar pauses a signal and its checks without blocking advisories" do
+    data = %{
+      calendar_valid_until: "2026-10-23T08:01:00Z",
+      cfd_plan: %{
+        action: "buy",
+        checks: [
+          %{code: "calendar_data", status: "pass", required: true},
+          %{code: "calendar_window", status: "pass", required: true},
+          %{code: "reward_risk", status: "pass", required: true},
+          %{code: "bias", status: "warning", required: false}
+        ]
+      }
+    }
+
+    paused = InsightCache.expire_snapshot(data, ~U[2026-10-23 08:01:00Z])
+    assert paused.cfd_plan.action == "wait"
+    checks = Map.new(paused.cfd_plan.checks, &{&1.code, &1.status})
+    assert checks["calendar_data"] == "blocked"
+    assert checks["calendar_window"] == "unknown"
+    assert checks["reward_risk"] == "unknown"
+    assert checks["bias"] == "warning"
+  end
+
   test "setup expiry overrides otherwise fresh metadata" do
     data = %{
       ai_next_analysis_at: "2026-10-23T08:45:00Z",

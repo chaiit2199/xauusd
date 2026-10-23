@@ -39,7 +39,7 @@ defmodule GoldBackend.Services.Zoi do
   end
 
   # Two closed bars on either side confirm a swing. Only the latest of each is used.
-  defp swing_zones(h1, half) do
+  def swing_zones(h1, half, prefix \\ "") do
     swings = h1 |> Enum.sort_by(& &1.open_time, DateTime) |> Enum.chunk_every(5, 1, :discard)
 
     Enum.flat_map([:high, :low], fn side ->
@@ -55,7 +55,13 @@ defmodule GoldBackend.Services.Zoi do
           []
 
         [_, _, c, _, _] ->
-          [zone("swing_#{side}_#{DateTime.to_unix(c.open_time)}", Map.fetch!(c, side), half)]
+          [
+            zone(
+              "#{prefix}swing_#{side}_#{DateTime.to_unix(c.open_time)}",
+              Map.fetch!(c, side),
+              half
+            )
+          ]
       end
     end)
   end

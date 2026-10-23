@@ -101,7 +101,7 @@ defmodule GoldBackend.Services.SignalQualityTest do
     s = %{setup() | barrier: %{id: "previous_day_high", low: 4004.0, mid: 4005.0, high: 4006.0}}
     plan = StrategyPlan.build(@indicators, 4000.0, options(s, 4000.0))
     assert plan.action == "wait"
-    assert Enum.find(plan.checks, &(&1.code == "barrier_room")).status == "blocked"
+    assert Enum.find(plan.checks, &(&1.code == "reward_risk")).status == "blocked"
   end
 
   test "a quote reaching target invalidates the old setup immediately" do
@@ -277,6 +277,7 @@ defmodule GoldBackend.Services.SignalQualityTest do
              pass: 1,
              blocked: 2,
              unknown: 0,
+             warning: 0,
              sole_blocker: 1
            }
 

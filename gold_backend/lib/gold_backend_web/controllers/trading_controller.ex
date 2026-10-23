@@ -173,8 +173,11 @@ defmodule GoldBackendWeb.TradingController do
       ai_status: if(plan.action in ["buy", "sell"], do: "pending", else: "not_requested"),
       ai_cached_at: DateTime.to_iso8601(at),
       ai_ttl_seconds: InsightCache.interval_seconds(),
+      calendar_valid_until: Map.get(context, :calendar_valid_until),
       signal_valid_until:
-        if(plan.action in ["buy", "sell"],
+        if(
+          plan.action in ["buy", "sell"] or
+            Enum.any?(Map.get(plan, :checks, []), &(&1.code == "quote" and &1.status == "pass")),
           do: DateTime.to_iso8601(DateTime.add(context.latest.timestamp, 121)),
           else: nil
         ),
@@ -300,6 +303,7 @@ defmodule GoldBackendWeb.TradingController do
           as_of: now,
           quote: Keyword.get(opts, :quote),
           calendar_status: calendar.status,
+          calendar_valid_until: Map.get(calendar, :valid_until),
           warmup: warmup,
           warmup_detail: warmup_detail,
           blocking_event: blocking,
@@ -325,6 +329,7 @@ defmodule GoldBackendWeb.TradingController do
          live_price_ticks: live_ticks,
          events: events,
          calendar_status: calendar.status,
+         calendar_valid_until: Map.get(calendar, :valid_until),
          plan: plan,
          price_ticks: length(prices),
          price_action: price_action

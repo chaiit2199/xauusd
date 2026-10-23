@@ -10,7 +10,7 @@ defmodule Mix.Tasks.Gold.Decisions do
 
     Enum.each(stats.checks, fn c ->
       Mix.shell().info(
-        "#{c.code}: evaluated=#{c.evaluated} pass=#{c.pass} blocked=#{c.blocked} unknown=#{c.unknown} sole_blocker=#{c.sole_blocker}"
+        "#{c.code}: evaluated=#{c.evaluated} pass=#{c.pass} blocked=#{c.blocked} unknown=#{c.unknown} warning=#{c.warning} sole_blocker=#{c.sole_blocker}"
       )
     end)
 

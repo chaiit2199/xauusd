@@ -21,7 +21,12 @@ defmodule GoldBackend.Services.RuleStatistics do
     rows
     |> Enum.reduce(%{}, fn row, acc ->
       checks = Map.get(row, "checks", [])
-      unmet = Enum.count(checks, &(&1["status"] != "pass"))
+
+      unmet =
+        Enum.count(
+          checks,
+          &(Map.get(&1, "required", true) and &1["status"] not in ["pass", "warning"])
+        )
 
       Enum.reduce(checks, acc, fn c, counts ->
         code = c["code"]
@@ -33,13 +38,18 @@ defmodule GoldBackend.Services.RuleStatistics do
             pass: 0,
             blocked: 0,
             unknown: 0,
+            warning: 0,
             sole_blocker: 0
           })
 
         status =
-          case c["status"] do
+          case if(c["required"] == false and c["status"] != "pass",
+                 do: "warning",
+                 else: c["status"]
+               ) do
             "pass" -> :pass
             "blocked" -> :blocked
+            "warning" -> :warning
             _ -> :unknown
           end
 

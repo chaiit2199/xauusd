@@ -286,7 +286,7 @@ export function Dashboard() {
       ) : null}
       <div className="news-band">
         <SignalHistory />
-        <NewsList title="Tin mới nhất · hôm nay và hôm qua (UTC)" filterable articles={articles}
+        <NewsList title="Tin mới nhất · hôm nay và hôm qua (UTC)" articles={articles}
           empty="Chưa có tin hôm nay và hôm qua theo UTC. Chọn “Cập nhật tin” để đồng bộ." />
       </div>
       </main>

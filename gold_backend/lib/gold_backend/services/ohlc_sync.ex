@@ -8,42 +8,36 @@ defmodule GoldBackend.Services.OhlcSync do
     now = Keyword.get(opts, :now, DateTime.utc_now())
 
     if provider.configured?() do
-      case provider.quote(opts) do
-        {:ok, _quote} ->
-          requests =
-            plan(
-              store.load(900, slot),
-              store.load(3600, slot),
-              store.recent_attempts(now),
-              slot,
-              now
-            )
+      requests =
+        plan(
+          store.load(900, slot),
+          store.load(3600, slot),
+          store.recent_attempts(now),
+          slot,
+          now
+        )
 
-          Enum.reduce_while(requests, %{status: "ok", error: nil}, fn {seconds, at}, _acc ->
-            with {:ok, id} <- store.reserve(at, seconds, now) do
-              case provider.fetch(at, seconds, opts) do
-                {:ok, bar} ->
-                  :ok = store.put(bar, seconds)
-                  store.finish(id, "ok")
-                  {:cont, %{status: "ok", error: nil}}
+      Enum.reduce_while(requests, %{status: "ok", error: nil}, fn {seconds, at}, _acc ->
+        with {:ok, id} <- store.reserve(at, seconds, now) do
+          case provider.fetch(at, seconds, opts) do
+            {:ok, bar} ->
+              :ok = store.put(bar, seconds)
+              store.finish(id, "ok")
+              {:cont, %{status: "ok", error: nil}}
 
-                {:error, reason} ->
-                  store.finish(id, error_code(reason))
-                  {:halt, %{status: "error", error: message(reason)}}
-              end
-            else
-              {:error, _} ->
-                {:halt,
-                 %{
-                   status: "limited",
-                   error: "Đang chờ hạn mức OHLC; tối đa 8 lượt/giờ cho ứng dụng."
-                 }}
-            end
-          end)
-
-        {:error, reason} ->
-          %{status: "error", error: message(reason)}
-      end
+            {:error, reason} ->
+              store.finish(id, error_code(reason))
+              {:halt, %{status: "error", error: message(reason)}}
+          end
+        else
+          {:error, _} ->
+            {:halt,
+             %{
+               status: "limited",
+               error: "Đang chờ hạn mức OHLC; tối đa 8 lượt/giờ cho ứng dụng."
+             }}
+        end
+      end)
     else
       %{status: "missing_key", error: message(:missing_key)}
     end
@@ -58,7 +52,8 @@ defmodule GoldBackend.Services.OhlcSync do
     h1_times = MapSet.new(Enum.map(h1, &DateTime.to_unix(&1.open_time)))
 
     available? = fn seconds, at, known ->
-      not MapSet.member?(known, DateTime.to_unix(at)) and
+      not GoldBackend.Services.MarketSchedule.closed_interval?(at, seconds) and
+        not MapSet.member?(known, DateTime.to_unix(at)) and
         not Enum.any?(attempts, fn a ->
           a.timeframe == seconds and DateTime.compare(a.open_time, at) == :eq and
             DateTime.diff(now, a.requested_at) <
@@ -109,7 +104,7 @@ defmodule GoldBackend.Services.OhlcSync do
 
   defp message(:clock_skew),
     do:
-      "Thời gian báo giá Gold API đi trước máy chủ hơn 60 giây; cần kiểm tra đồng bộ giờ máy chủ."
+      "Thời gian báo giá Gold API đi trước máy chủ hơn 5 giây; cần kiểm tra đồng bộ giờ máy chủ."
 
   defp message(:invalid_quote),
     do: "Gold API trả báo giá XAU/USD không hợp lệ; chờ dữ liệu hợp lệ."

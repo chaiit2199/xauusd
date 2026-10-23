@@ -31,6 +31,14 @@ defmodule GoldBackend.Services.StrategyPlan do
 
     event = Keyword.get(opts, :blocking_event)
 
+    calendar_ok =
+      Keyword.get(opts, :calendar_status) == "ok" and
+        calendar_current?(Keyword.get(opts, :calendar_valid_until), now)
+
+    h1_ready = StrategyPolicy.h1_ready?(bias)
+    neutral_breakout = StrategyPolicy.neutral_breakout?(setup, bias)
+    active_side = if ready, do: setup.action, else: bias.side
+
     quote_ok = EntryQuality.fresh_quote?(quote, now)
 
     lifetime_ok =
@@ -48,10 +56,14 @@ defmodule GoldBackend.Services.StrategyPlan do
     checks = [
       check(
         "data",
-        not Keyword.get(opts, :warmup, false),
-        Keyword.get(opts, :warmup_detail) || "Dữ liệu OHLC đã sẵn sàng."
+        not Keyword.get(opts, :warmup, false) and h1_ready,
+        Keyword.get(opts, :warmup_detail) ||
+          if(h1_ready,
+            do: "Dữ liệu OHLC đã sẵn sàng.",
+            else: "Chưa đủ H1 hợp lệ; không coi thiếu dữ liệu là H1 trung tính."
+          )
       ),
-      check("bias", bias.side != "neutral", bias.reason),
+      check("bias", bias.side != "neutral", bias.reason, false, "advisory"),
       check(
         "m15_data",
         setup.state != "data_unavailable",
@@ -60,7 +72,9 @@ defmodule GoldBackend.Services.StrategyPlan do
       check(
         "zoi",
         if(setup.state in ["data_unavailable", "idle"], do: nil, else: setup.state != "wait_zoi"),
-        "Nến M15 phải chạm vùng ZOI đã có trước nến xác nhận."
+        "Lệnh hồi cần chạm ZOI; breakout cần chạm vùng retest hình thành sau phá vỡ, trước nến xác nhận.",
+        true,
+        "setup"
       ),
       check(
         "trigger",
@@ -69,13 +83,21 @@ defmodule GoldBackend.Services.StrategyPlan do
       ),
       check(
         "direction",
-        if(ready, do: setup.action == bias.side, else: nil),
-        "Xác nhận M15 phải cùng hướng H1."
+        if(ready and not neutral_breakout,
+          do: StrategyPolicy.direction_allowed?(setup, bias),
+          else: nil
+        ),
+        if(neutral_breakout,
+          do: "Breakout–retest khi H1 trung tính: không yêu cầu đồng hướng H1.",
+          else: "Lệnh hồi cần đồng hướng H1; không xét giao dịch ngược H1."
+        ),
+        not neutral_breakout,
+        "setup"
       ),
       check(
         "target_structure",
         if(ready, do: is_number(setup.take_profit), else: nil),
-        "Cần vùng hỗ trợ/kháng cự đã xác nhận để xác định TP; không tự đặt mục tiêu 2R."
+        "Cần mục tiêu từ cấu trúc H1/ngày trước hoặc swing M15 đã xác nhận; không tự tạo TP để đủ R:R."
       ),
       check(
         "setup_lifetime",
@@ -90,23 +112,64 @@ defmodule GoldBackend.Services.StrategyPlan do
       check(
         "structure",
         if(quality, do: quality.structure_ok, else: nil),
-        "Cấu trúc và vùng giá của setup phải còn hiệu lực."
+        if(Map.get(setup, :setup_kind) == "breakout_retest",
+          do:
+            "Retest: giá chưa chạm SL; nến đóng chưa vượt điểm vô hiệu đã lưu. Râu xuyên vùng không tự hủy setup.",
+          else: "Lệnh hồi: giá còn trong giới hạn cấu trúc và chưa chạm SL."
+        ),
+        true,
+        "setup"
       ),
       check(
         "calendar_data",
-        if(Keyword.get(opts, :calendar_status) == "ok", do: true, else: nil),
-        "Lịch tin phải tải thành công trước khi phát phiếu."
+        if(calendar_ok, do: true, else: nil),
+        if(calendar_ok,
+          do: "Lịch tin đã xác minh; bản tải mới hoặc cache còn hiệu lực.",
+          else: "Chưa xác minh lịch tin; chờ bản tải mới hoặc cache còn hiệu lực và đủ phạm vi."
+        )
       ),
       check(
         "calendar_window",
-        if(Keyword.get(opts, :calendar_status) == "ok", do: is_nil(event), else: nil),
-        if(event,
-          do: "Khóa tin #{event.title}: 15 phút trước / 30 phút sau.",
-          else: "Ngoài cửa sổ tin đỏ."
+        if(calendar_ok, do: is_nil(event), else: nil),
+        cond do
+          not calendar_ok ->
+            "Chưa xác minh lịch tin nên chưa xác định được cửa sổ tin."
+
+          event ->
+            "Khóa tin #{event.title}: 15 phút trước / 30 phút sau."
+
+          true ->
+            "Ngoài cửa sổ tin đỏ."
+        end
+      ),
+      check(
+        "session",
+        session,
+        if(session,
+          do: "Trong khung giờ ưu tiên 14:00–22:00, thứ Hai–thứ Sáu.",
+          else:
+            "Ngoài khung giờ ưu tiên 14:00–22:00; vẫn xét tín hiệu nếu các điều kiện bắt buộc đạt."
+        ),
+        false,
+        "advisory"
+      ),
+      check(
+        "market_open",
+        if(GoldBackend.Services.MarketSchedule.open?(now),
+          do: if(quote_ok, do: true, else: nil),
+          else: false
+        ),
+        "Ngoài khoảng nghỉ đã cấu hình và có báo giá mới để xác nhận nguồn đang cập nhật."
+      ),
+      check(
+        "quote",
+        quote_ok,
+        if(quote_ok,
+          do: "Báo giá hợp lệ trong 120 giây.",
+          else:
+            "Chưa lấy được báo giá hợp lệ trong 120 giây; không dùng giá nến cũ để xác nhận entry."
         )
       ),
-      check("session", session, "Khung phát phiếu: 14:00–22:00 giờ Việt Nam, thứ Hai–thứ Sáu."),
-      check("quote", quote_ok, "Cần báo giá mới trong 120 giây."),
       check(
         "entry_drift",
         if(quality, do: quality.drift_ok, else: nil),
@@ -118,18 +181,15 @@ defmodule GoldBackend.Services.StrategyPlan do
         "Entry phải nằm giữa SL/TP; SL không vượt 5 ATR M15."
       ),
       check(
-        "barrier_room",
-        if(quality, do: barrier_room?(setup, entry, spread), else: nil),
-        "Khoảng trống tới vùng cản đã xác nhận phải đủ R:R 1,5 sau chi phí ước tính."
-      ),
-      check(
         "reward_risk",
-        if(quality, do: quality.reward_risk_ok, else: nil),
-        "R:R sau spread phải đạt ít nhất 1,5."
+        if(quality, do: quality.reward_risk_ok and barrier_room?(setup, entry, spread), else: nil),
+        "R:R ước tính tới TP và cản đầu tiên phải ≥ 1,5 sau chi phí; gộp kiểm tra khi TP chính là mép cản."
       )
     ]
 
-    reasons = checks |> Enum.reject(&(&1.status == "pass")) |> Enum.map(& &1.reason)
+    reasons =
+      checks |> Enum.filter(&(&1.required and &1.status != "pass")) |> Enum.map(& &1.reason)
+
     action = if reasons == [], do: setup.action, else: "wait"
 
     state =
@@ -140,8 +200,7 @@ defmodule GoldBackend.Services.StrategyPlan do
         lifetime_ok == false ->
           "expired"
 
-        not quote_ok or Keyword.get(opts, :warmup, false) or
-            Keyword.get(opts, :calendar_status) != "ok" ->
+        not quote_ok or Keyword.get(opts, :warmup, false) or not h1_ready or not calendar_ok ->
           "paused"
 
         quality && (not quality.structure_ok or quality.target_reached) ->
@@ -221,7 +280,7 @@ defmodule GoldBackend.Services.StrategyPlan do
       execution_status: "not_tracked",
       execution_ready: false,
       bias: bias,
-      lean: bias.side,
+      lean: active_side,
       lean_label: label,
       setup: setup.state,
       setup_label: setup.reason,
@@ -250,9 +309,10 @@ defmodule GoldBackend.Services.StrategyPlan do
       soft_flags: warnings,
       entry_guard: %{blocked: reasons != [], reasons: reasons},
       summary: "#{label} · #{setup.reason}",
+      setup_kind: Map.get(setup, :setup_kind),
       notes: warnings,
       watchlist: [],
-      session_key: "#{Date.to_iso8601(DateTime.to_date(local))}:14-22_VN",
+      session_key: "#{Date.to_iso8601(DateTime.to_date(local))}:all_sessions",
       news_digest: Keyword.get(opts, :news_bias, %{}) |> Map.get(:digest),
       news_tone: Keyword.get(opts, :news_bias, %{}) |> Map.get(:tone_label),
       rule_commentary:
@@ -285,6 +345,7 @@ defmodule GoldBackend.Services.StrategyPlan do
         as_of: now,
         quote: quote,
         calendar_status: Map.get(context, :calendar_status, "unavailable"),
+        calendar_valid_until: Map.get(context, :calendar_valid_until),
         blocking_event: GoldBackend.Services.EconomicCalendar.blocking(context.events, now),
         warmup: context.warmup,
         warmup_detail: context.warmup_detail,
@@ -307,17 +368,53 @@ defmodule GoldBackend.Services.StrategyPlan do
     }
   end
 
-  defp check(code, value, reason),
-    do: %{
-      code: code,
-      status:
-        case value do
-          true -> "pass"
-          false -> "blocked"
-          nil -> "unknown"
-        end,
-      reason: reason
-    }
+  def expire_checks(checks, code, reason) do
+    dependent = [
+      "direction",
+      "trigger",
+      "entry_drift",
+      "levels",
+      "reward_risk",
+      "barrier_room",
+      "structure",
+      "setup_target"
+    ]
+
+    Enum.map(checks || [], fn check ->
+      cond do
+        check.code == code ->
+          Map.merge(check, %{status: "blocked", reason: reason, required: true})
+
+        (check.code in dependent or (code == "calendar_data" and check.code == "calendar_window")) and
+            Map.get(check, :required, true) ->
+          Map.merge(check, %{status: "unknown", reason: "Chờ đánh giá lại với dữ liệu mới."})
+
+        true ->
+          check
+      end
+    end)
+  end
+
+  defp calendar_current?(nil, _), do: true
+
+  defp calendar_current?(expiry, now) do
+    case DateTime.from_iso8601(expiry) do
+      {:ok, at, _} -> DateTime.compare(now, at) == :lt
+      _ -> false
+    end
+  end
+
+  defp check(code, value, reason, required \\ true, scope \\ "required") do
+    status =
+      cond do
+        value == true -> "pass"
+        not required -> "warning"
+        value == false -> "blocked"
+        true -> "unknown"
+      end
+
+    %{code: code, status: status, reason: reason, required: required, scope: scope}
+  end
 
   defp warn(xs, true, message), do: xs ++ [message]
   defp warn(xs, _, _), do: xs

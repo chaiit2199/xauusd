@@ -8,6 +8,7 @@ defmodule GoldBackend.Application do
     children =
       [
         GoldBackend.Repo,
+        GoldBackend.Services.CalendarCache,
         {Phoenix.PubSub, name: GoldBackend.PubSub},
         {Task.Supervisor, name: GoldBackend.TaskSupervisor},
         GoldBackendWeb.Endpoint

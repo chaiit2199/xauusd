@@ -39,7 +39,7 @@ defmodule GoldBackend.Services.DecisionPlan do
           else: plan.block_reason || setup.reason
         ),
       trigger:
-        "Chỉ cần một xác nhận M15: pinbar, engulfing, sweep–reclaim hoặc phá vỡ–retest tại vùng đã có trước, cùng hướng H1. Giá mới, lịch tin, cấu trúc và R:R vẫn phải đạt.",
+        "Một mẫu M15 hợp lệ là đủ. Lệnh hồi cần cùng hướng H1; breakout–retest được xét cả khi H1 trung tính nhưng đủ dữ liệu. Giá mới, lịch tin, điểm vô hiệu và R:R vẫn bắt buộc.",
       stop_loss: stop,
       stop_reason:
         if(is_number(stop),
@@ -75,8 +75,13 @@ defmodule GoldBackend.Services.DecisionPlan do
       expires_at: Map.get(setup, :expires_at),
       cancellation: [
         "Hết hai nến M15 từ xác nhận.",
-        "Giá phá vùng cấu trúc hoặc chạm mục tiêu trước khi sử dụng tín hiệu.",
-        "H1 đổi hướng hoặc setup đi qua cửa sổ tin quan trọng.",
+        if(Map.get(setup, :setup_kind) == "breakout_retest" and is_number(stop),
+          do:
+            "Giá chạm SL #{round2(stop)} hoặc nến M15 đóng #{if setup.action == "buy", do: "dưới hoặc bằng", else: "trên hoặc bằng"} điểm vô hiệu #{round2(Map.get(setup, :invalidation_price) || if(setup.action == "buy", do: zone.low, else: zone.high))}.",
+          else: "Giá phá vùng cấu trúc hoặc chạm SL của setup."
+        ),
+        "Giá chạm mục tiêu trước khi sử dụng tín hiệu.",
+        "H1 không còn phù hợp với nhánh setup hoặc setup đi qua cửa sổ tin quan trọng.",
         "Giá/dữ liệu quá hạn: tạm dừng và đánh giá lại."
       ],
       simulation_seconds: StrategyPolicy.simulation_seconds()
@@ -87,8 +92,10 @@ defmodule GoldBackend.Services.DecisionPlan do
     r = StrategyPolicy.min_reward_risk()
     limit = StrategyPolicy.entry_atr() * s.atr
 
+    breakout = Map.get(s, :setup_kind) == "breakout_retest"
+
     if s.action == "buy" do
-      low = max(s.stop_loss + 0.01, s.zone.low + 0.01)
+      low = if breakout, do: s.stop_loss + 0.01, else: max(s.stop_loss + 0.01, s.zone.low + 0.01)
 
       high =
         Enum.min([
@@ -106,7 +113,9 @@ defmodule GoldBackend.Services.DecisionPlan do
           (target + r * s.stop_loss) / (1 + r) + cost
         ])
 
-      high = min(s.stop_loss - 0.01, s.zone.high - 0.01)
+      high =
+        if breakout, do: s.stop_loss - 0.01, else: min(s.stop_loss - 0.01, s.zone.high - 0.01)
+
       range(low, high)
     end
   end
@@ -159,6 +168,9 @@ defmodule GoldBackend.Services.DecisionPlan do
         else: p < s.stop_loss and p > s.take_profit
       )
 
+  defp zone_name("m15_swing_high" <> _), do: "đỉnh M15 đã xác nhận"
+  defp zone_name("m15_swing_low" <> _), do: "đáy M15 đã xác nhận"
+  defp zone_name("breakout_" <> _), do: "vùng retest sau phá vỡ M15"
   defp zone_name("sma20_h1"), do: "SMA20 H1"
   defp zone_name("aoi_high_h1"), do: "AOI trên H1 · cực trị thân 50 nến + ATR14"
   defp zone_name("aoi_low_h1"), do: "AOI dưới H1 · cực trị thân 50 nến − ATR14"

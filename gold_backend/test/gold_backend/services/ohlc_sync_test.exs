@@ -49,42 +49,15 @@ defmodule GoldBackend.Services.OhlcSyncTest do
     refute_received {:reserve, _, _}
   end
 
-  test "a quote 36 seconds ahead of the VPS allows closed M15 and H1 ingestion" do
+  test "historical OHLC backfill does not depend on a working live quote endpoint" do
     get = fn url, headers, options ->
-      {:ok, response} = http_ok(url, headers, options)
-
-      if String.contains?(url, "/price/") do
-        body = Jason.decode!(response.body)
-        body = Map.put(body, "updatedAt", DateTime.to_iso8601(DateTime.add(@now, 36)))
-        {:ok, %{response | body: Jason.encode!(body)}}
-      else
-        {:ok, response}
-      end
+      refute String.contains?(url, "/price/")
+      http_ok(url, headers, options)
     end
 
     assert OhlcSync.refresh(@slot, sync_options(get)) == %{status: "ok", error: nil}
     assert [%{open_time: ~U[2026-10-22 15:00:00Z]}] = Store.load(900, @slot)
     assert [%{open_time: ~U[2026-10-22 14:00:00Z]}] = Store.load(3600, @slot)
-  end
-
-  test "excessive clock skew and malformed quotes explain the block without OHLC requests" do
-    for {changes, message} <- [
-          {%{"updatedAt" => DateTime.to_iso8601(DateTime.add(@now, 61))}, "đi trước máy chủ"},
-          {%{"currency" => nil}, "không hợp lệ"}
-        ] do
-      get = fn url, headers, options ->
-        refute String.contains?(url, "/ohlc/")
-        {:ok, response} = http_ok(url, headers, options)
-        body = response.body |> Jason.decode!() |> Map.merge(changes) |> Jason.encode!()
-        {:ok, %{response | body: body}}
-      end
-
-      result = OhlcSync.refresh(@slot, sync_options(get))
-      assert result.status == "error"
-      assert result.error =~ message
-      refute_received {:reserve, _, _}
-      assert Store.load(900, @slot) == []
-    end
   end
 
   test "rate limiting stops the batch and records the failed reservation" do
@@ -102,33 +75,14 @@ defmodule GoldBackend.Services.OhlcSyncTest do
     refute_received {:reserve, 3600, _}
   end
 
-  test "local quota prevents an OHLC request and a stale quote prevents any reservation" do
+  test "local quota prevents network requests even when quote freshness is unknown" do
     Process.put(:reservation, {:error, :quota_or_cooldown})
 
-    get = fn url, headers, options ->
-      refute String.contains?(url, "/ohlc/")
-      http_ok(url, headers, options)
-    end
+    assert OhlcSync.refresh(@slot, sync_options(fn _, _, _ -> flunk("quota blocks HTTP") end)).status ==
+             "limited"
 
-    assert OhlcSync.refresh(@slot, sync_options(get)).status == "limited"
     assert_receive {:reserve, 900, _}
-
-    stale = fn _, _, _ ->
-      {:ok,
-       %HTTPoison.Response{
-         status_code: 200,
-         body:
-           Jason.encode!(%{
-             symbol: "XAU",
-             currency: "USD",
-             price: 4100,
-             updatedAt: "2026-10-21T15:15:00Z"
-           })
-       }}
-    end
-
-    assert OhlcSync.refresh(@slot, sync_options(stale)).status == "error"
-    refute_received {:reserve, _, _}
+    assert Store.load(900, @slot) == []
   end
 
   defp sync_options(get),

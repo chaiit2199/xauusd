@@ -5,8 +5,12 @@ Dockerfile không sao chép `rel/`, vì vậy cấu hình trong `rel/env.sh.eex`
 Luồng hiện hành gửi tín hiệu khi rule xác nhận `buy` hoặc `sell`, một lần cho mỗi
 setup. Không giới hạn một phiếu mỗi phiên. AI bổ sung bình luận sau, không giữ
 hoặc phủ quyết tín hiệu; nội dung AI chỉ được dùng khi vượt kiểm tra chất lượng.
+Khung gửi thông báo tách khỏi khung phân tích: `TELEGRAM_NOTIFY_HOURS=14-22`
+(mặc định, giờ Việt Nam), `all` để nhận cả ngày hoặc `22-7` cho khung qua nửa đêm.
+Website vẫn phân tích và lưu tín hiệu ngoài giờ thông báo. Tín hiệu bị bỏ qua ngoài
+khung không được xếp hàng gửi lại khi mở khung vì có thể đã hết hạn.
 `wait` / “Đứng ngoài” không gửi. Đây là tín hiệu tham khảo, không xác nhận lệnh khớp.
-Nhận định hết chu kỳ M15 không được gửi. Khi chưa cấu hình `GOLD_API_KEY`, nguồn lỗi hoặc chưa đủ 30 nến M15/H1,
+Nhận định hết chu kỳ M15 không được gửi. Khi chưa cấu hình `GOLD_API_KEY`, nguồn lỗi hoặc chưa đủ 30 nến M15 và 50 nến H1,
 tín hiệu giữ `wait`, nên chưa có thông báo Buy/Sell. OHLC được đồng bộ tự động
 35 giây sau các mốc đóng nến; xem tiến độ trên giao diện và hướng dẫn trong [AI.md](AI.md).
 
@@ -16,6 +20,7 @@ tín hiệu giữ `wait`, nên chưa có thông báo Buy/Sell. OHLC được đ�
    ```bash
    export TELEGRAM_BOT_TOKEN='...'
    export TELEGRAM_CHAT_ID='...'
+   export TELEGRAM_NOTIFY_HOURS='14-22'
    ```
 
 2. Với chat cá nhân, mở đúng bot trong Telegram và gửi `/start`. Nếu dùng

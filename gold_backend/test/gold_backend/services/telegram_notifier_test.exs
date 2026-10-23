@@ -11,6 +11,15 @@ defmodule GoldBackend.Services.TelegramNotifierTest do
   }
 
   setup do
+    hours = Application.get_env(:gold_backend, :notification_hours)
+    Application.put_env(:gold_backend, :notification_hours, "all")
+
+    on_exit(fn ->
+      if hours,
+        do: Application.put_env(:gold_backend, :notification_hours, hours),
+        else: Application.delete_env(:gold_backend, :notification_hours)
+    end)
+
     previous = Application.get_env(:gold_backend, :telegram)
     Application.put_env(:gold_backend, :telegram, bot_token: " test-token ", chat_id: " 12345 ")
 

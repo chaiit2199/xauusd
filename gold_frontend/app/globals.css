@@ -449,7 +449,6 @@ input:focus-visible, select:focus-visible { outline: 2px solid var(--gold); outl
 .news-filters { display: flex; flex-wrap: wrap; align-items: center; gap: 10px; margin: 18px 0; font-size: 13px; color: var(--muted); }
 .news-filters select { width: auto; }
 .news-filters > span { flex-basis: 100%; font-size: 12px; }
-.impact-label { display: block; margin-top: 5px; font-size: 11px; color: var(--muted); font-weight: 400; letter-spacing: 0; text-transform: none; }
 .event-list { list-style: none; margin: 0; padding: 0; }
 .event-list li { display: grid; grid-template-columns: 130px minmax(0, 1fr) auto; gap: 16px; align-items: center; padding: 14px 0; border-bottom: 1px solid var(--line); }
 .event-list time { color: var(--muted); font-size: 13px; }
@@ -472,3 +471,23 @@ input:focus-visible, select:focus-visible { outline: 2px solid var(--gold); outl
 .analysis-details[open] > summary { margin-bottom: 16px; color: var(--text); }
 .analysis-details > .panel { padding: 0; border: 0; box-shadow: none; }
 .ticket > .ticket-summary { margin-top: 16px; }
+
+/* Rule state is conveyed by icon, label and color together. */
+.rule-checklist { margin-top: 24px; padding-top: 20px; border-top: 1px solid var(--line); }
+.rule-legend { display: flex; flex-wrap: wrap; gap: 12px 20px; font-size: 13px; }
+.rule-legend > span, .rule-column { display: inline-flex; align-items: center; gap: 7px; }
+.rule-icon { width: 22px; height: 22px; flex: 0 0 22px; }
+.rule-pass { color: #71d6a5; }
+.rule-blocked { color: #ff9292; }
+.rule-unknown { color: #90bffd; }
+.rule-warning { color: #e9c46b; }
+.rule-cards { list-style: none; padding: 0; margin: 16px 0 0; display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px; }
+.rule-card { display: flex; align-items: flex-start; gap: 10px; padding: 14px; border: 1px solid var(--line); border-radius: 10px; background: rgba(255,255,255,.02); min-width: 0; }
+.rule-card > div { min-width: 0; flex: 1; }
+.rule-card-heading { display: flex; flex-wrap: wrap; align-items: baseline; justify-content: space-between; gap: 6px 12px; font-size: 14px; }
+.rule-card-heading > span { color: var(--muted); font-size: 11px; }
+.rule-card p { margin: 8px 0 0; color: var(--muted); font-size: 13px; line-height: 1.6; overflow-wrap: anywhere; }
+.rule-card-blocked { border-color: rgba(255,146,146,.35); }
+.rule-card-warning { border-color: rgba(233,196,107,.24); }
+.rule-state { font-weight: 600; }
+@media (max-width: 760px) { .rule-cards { grid-template-columns: 1fr; } }

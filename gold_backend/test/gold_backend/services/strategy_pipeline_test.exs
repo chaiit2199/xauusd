@@ -169,7 +169,7 @@ defmodule GoldBackend.Services.StrategyPipelineTest do
 
     assert plan.action == "wait"
     statuses = Map.new(plan.checks, &{&1.code, &1.status})
-    assert statuses["session"] == "blocked"
+    assert statuses["session"] == "warning"
     assert statuses["quote"] == "blocked"
     assert statuses["calendar_data"] == "unknown"
     assert statuses["reward_risk"] == "unknown"

@@ -55,7 +55,57 @@ Snapshot kiểm tra lại bình luận trước khi hiển thị. Khi không h�
 Telegram kiểm tra bình luận trước khi sử dụng; nếu chưa có bình luận hợp lệ,
 thông báo dùng lý do từ rule. Không thay model hay temperature.
 
-## Bộ tín hiệu hiện hành: zoi-v4-confluence
+## Bộ tín hiệu hiện hành: zoi-v5-setup-policy
+
+V5 áp dụng phân loại của bản thử nghiệm v2 trong thiết kế; dùng version mới để
+không gộp thống kê/lịch sử với v4. Không cần thêm migration cho thay đổi này.
+
+- `checks` có `required`, `scope` (`required`, `setup`, `advisory`) và status
+  `pass/blocked/unknown/warning`. Chỉ các check bắt buộc chưa đạt ngăn phát tín hiệu.
+  H1 định hướng và khung ưu tiên 14:00–22:00 là khuyến nghị. Thiếu H1 vẫn là lỗi
+  dữ liệu bắt buộc; `data_status` tách khỏi `side` trung tính. Cooldown đổi hướng
+  không được dùng như một thị trường trung tính để lách kiểm tra.
+- Lệnh hồi vẫn cần H1 cùng hướng. H1 trung tính đủ dữ liệu được xét breakout–retest
+  BUY/SELL; không mở nhánh giao dịch ngược H1. Nhánh setup được lưu vào snapshot.
+- Thêm vùng breakout từ high/low của 20 nến M15 trước nến breakout. Breakout đóng
+  vượt mức + đệm 0,10 ATR; vùng retest hình thành lúc breakout đóng. ATR dựng vùng
+  chỉ dùng nến tới breakout, không dùng nến retest. Nến kế tiếp phải chạm lại vùng,
+  giữ mép đối diện và đóng cùng hướng bên ngoài vùng. Không phát ngay khi chỉ breakout.
+- TP được chọn ở cản gần nhất trong các vùng H1/ngày trước và swing M15 (hai nến
+  xác nhận mỗi phía), đã biết trước nến trigger. Không bỏ qua cản gần để chọn TP xa.
+  Gộp `barrier_room` vào `reward_risk`: phải đủ 1,5R sau chi phí tới cả TP và cản đầu.
+- Giữ 30 phút từ xác nhận, lệch bất lợi ≤0,30 ATR₀, SL ≤5 ATR₀, giá mới ≤120 giây.
+  Giá đi trước máy chủ quá 5 giây bị loại thống nhất ở adapter và bộ rule.
+- Với retest, chạm SL vô hiệu ngay; râu xuyên mép vùng nhưng chưa chạm SL không tự
+  vô hiệu. Nến M15 đóng vượt điểm vô hiệu đã lưu sẽ hủy setup. Điểm vô hiệu và
+  quy tắc này hiện trong kế hoạch; nhánh hồi giữ kiểm tra mép vùng tại báo giá.
+- Cache lịch tin được tải lại sau 5 phút, chỉ dự phòng lỗi tới tối đa 15 phút từ
+  lần tải thành công. Không gia hạn khi dùng lại; phải bao phủ cửa sổ yêu cầu trong
+  tuần dữ liệu. Hết cache, qua tuần hoặc thiếu phạm vi thì chưa xác minh. API/FE
+  tự dừng khi cache hết hiệu lực. Cửa sổ tin vẫn 15 phút trước–30 phút sau.
+- Đồng bộ OHLC lịch sử không phụ thuộc endpoint giá trực tiếp hoạt động; vẫn giữ
+  hạn mức 8 lượt/giờ. Tín hiệu mới vẫn bắt buộc báo giá hợp lệ. Lượt đánh giá chạy
+  mỗi phút, không thay timestamp nguồn bằng thời điểm HTTP để làm giá trông mới.
+- `MarketSchedule` chỉ bỏ qua nến thiếu nếu **toàn bộ khoảng nến** thuộc khoảng
+  nghỉ đã khai báo trong `:market_closures`, là danh sách `%{from: DateTime, until:
+  DateTime}` UTC. Khoảng nghỉ cũng chặn phát tín hiệu và không bị gọi OHLC backfill.
+  Mặc định chưa có lịch nghỉ xác minh từ nguồn: không tự suy diễn gap cuối tuần,
+  ngày lễ hoặc giờ broker. Ngoài khoảng nghỉ khai báo, hoạt động nguồn được kiểm
+  tra bằng báo giá mới và nến mới; đây không phải trạng thái sàn/broker được xác nhận.
+  Các kỳ nghỉ có DST phải được chuyển đúng sang UTC khi cấu hình.
+- Giờ Telegram độc lập qua `TELEGRAM_NOTIFY_HOURS` (mặc định `14-22`, giờ Việt Nam;
+  `all` hoặc khoảng qua nửa đêm như `22-7`). Ngoài giờ vẫn lưu tín hiệu, không gửi bù
+  tín hiệu cũ sau đó. Không thay số lượng lệnh/vị thế hay gắn tài khoản broker.
+- UI dùng tick / X / đồng hồ / tam giác cảnh báo cùng nhãn chữ; các khuyến nghị
+  không tính vào số chặn hoặc “chặn duy nhất”. Bỏ bộ lọc và impact-label của bài viết,
+  giữ bảo vệ lịch sự kiện riêng. Hết dữ liệu, các check không giữ tick xanh cũ.
+
+Theo [tài liệu Gold API](https://gold-api.com/llms.txt), `/price/XAU` có timestamp
+nguồn và `/ohlc/XAU` là endpoint riêng. Không dùng tần suất lấy dữ liệu để suy diễn
+rằng timestamp upstream mới hay thị trường đang mở. Bộ này vẫn cần mô phỏng đánh
+giá, chưa có bằng chứng tối ưu lợi nhuận.
+
+## Nền tảng v4: zoi-v4-confluence
 
 V4 mở rộng cách tìm setup, không cộng mọi chỉ báo thành điều kiện chặn:
 

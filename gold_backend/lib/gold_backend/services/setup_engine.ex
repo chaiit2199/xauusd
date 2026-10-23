@@ -37,13 +37,14 @@ defmodule GoldBackend.Services.SetupEngine do
       barrier: nil,
       technical_context: context,
       supporting_evidence: [],
-      candidate_count: 0
+      candidate_count: 0,
+      setup_kind: nil,
+      invalidation_price: nil
     }
 
     valid =
       length(bars) >= 30 and Enum.all?(bars, &valid?/1) and
-        Enum.chunk_every(bars, 2, 1, :discard)
-        |> Enum.all?(fn [a, b] -> DateTime.diff(b.open_time, a.open_time) == 900 end)
+        GoldBackend.Services.MarketSchedule.consecutive?(bars, 900)
 
     cond do
       not valid ->
@@ -56,25 +57,42 @@ defmodule GoldBackend.Services.SetupEngine do
         last = List.last(bars)
         prev = Enum.at(bars, -2)
         i = Indicators.summarize_candles(bars, 900).indicators
+        prior_atr = Indicators.candle_atr(Enum.drop(bars, -1))
         # One fixed target is retained when current quote is checked later.
-        base = %{base | indicators: i, atr: i.atr_14, entry: last.close}
-        touched = Enum.filter(zones, &Zoi.touch?(last, &1))
+        m15_targets =
+          bars
+          |> Enum.drop(-1)
+          |> Zoi.swing_zones(prior_atr * 0.1, "m15_")
+          |> Enum.map(&Map.put(&1, :target_only, true))
+
+        breakouts = GoldBackend.Services.BreakoutZone.build(bars, prior_atr)
+        zones = zones ++ m15_targets ++ breakouts
+        base = %{base | indicators: i, atr: i.atr_14, entry: last.close, zones: zones}
+
+        touched =
+          Enum.filter(zones, &(not Map.get(&1, :target_only, false) and Zoi.touch?(last, &1)))
+
+        sides = if bias.side == "neutral", do: ["buy", "sell"], else: [bias.side]
 
         candidates =
-          Enum.flat_map(touched, fn zone ->
-            case pattern(last, prev, zone, bias.side) do
-              nil ->
-                []
-
-              name ->
-                if entry_side?(zone, bias.side) or name == "breakout_retest",
-                  do: [candidate(base, last, zone, name, bias.side)],
-                  else: []
-            end
-          end)
+          for zone <- touched,
+              side <- sides,
+              name = pattern(last, prev, zone, side),
+              name != nil,
+              bias.side != "neutral" or name == "breakout_retest",
+              not Map.has_key?(zone, :side) or zone.side == side,
+              entry_side?(zone, side) or name == "breakout_retest",
+              do: candidate(base, last, zone, name, side)
 
         cond do
-          bias.side == "neutral" ->
+          not StrategyPolicy.h1_ready?(bias) ->
+            %{
+              base
+              | state: "data_unavailable",
+                reason: "Chưa đủ dữ liệu H1 hợp lệ; không coi thiếu dữ liệu là H1 trung tính."
+            }
+
+          Map.get(bias, :regime) == "transition" ->
             %{base | state: "idle", reason: bias.reason}
 
           touched == [] ->
@@ -89,7 +107,11 @@ defmodule GoldBackend.Services.SetupEngine do
               base
               | state: "wait_m15",
                 reason:
-                  "Đã chạm ZOI; chờ pinbar, engulfing, sweep–reclaim hoặc phá vỡ–retest M15 cùng hướng H1."
+                  if(bias.side == "neutral",
+                    do: "H1 trung tính; chỉ xét phá vỡ–retest M15 đã xác nhận.",
+                    else:
+                      "Chờ pinbar, engulfing, sweep–reclaim hoặc phá vỡ–retest M15 phù hợp với hướng H1."
+                  )
             }
 
           true ->
@@ -118,10 +140,10 @@ defmodule GoldBackend.Services.SetupEngine do
       |> Enum.filter(fn z ->
         if side == "buy",
           do:
-            z.id != "previous_day_low" and not String.starts_with?(z.id, "swing_low") and
+            z.id != "previous_day_low" and not String.contains?(z.id, "swing_low") and
               z.mid > last.close,
           else:
-            z.id != "previous_day_high" and not String.starts_with?(z.id, "swing_high") and
+            z.id != "previous_day_high" and not String.contains?(z.id, "swing_high") and
               z.mid < last.close
       end)
       |> Enum.min_by(
@@ -141,6 +163,9 @@ defmodule GoldBackend.Services.SetupEngine do
           action: side,
           state: "ready",
           pattern: name,
+          setup_kind:
+            if(name == "breakout_retest", do: "breakout_retest", else: "trend_pullback"),
+          invalidation_price: if(side == "buy", do: zone.low, else: zone.high),
           zone: zone,
           barrier: barrier,
           stop_loss: Float.round(stop, 2),

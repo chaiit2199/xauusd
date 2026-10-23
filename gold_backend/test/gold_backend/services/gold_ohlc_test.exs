@@ -96,9 +96,10 @@ defmodule GoldBackend.Services.GoldOhlcTest do
           {120, :ok},
           {121, :stale_quote},
           {3600, :stale_quote},
-          {-6, :ok},
-          {-36, :ok},
-          {-60, :ok},
+          {-5, :ok},
+          {-6, :clock_skew},
+          {-36, :clock_skew},
+          {-60, :clock_skew},
           {-61, :clock_skew}
         ] do
       body = %{

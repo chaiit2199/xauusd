@@ -18,9 +18,13 @@ defmodule GoldBackend.Services.EntryQuality do
         )
 
     structure =
-      case Map.get(setup, :zone) do
-        %{low: low, high: high} -> if buy?, do: price > low, else: price < high
-        _ -> true
+      if Map.get(setup, :setup_kind) == "breakout_retest" do
+        if buy?, do: price > setup.stop_loss, else: price < setup.stop_loss
+      else
+        case Map.get(setup, :zone) do
+          %{low: low, high: high} -> if buy?, do: price > low, else: price < high
+          _ -> true
+        end
       end
 
     rr = if risk > 0, do: (reward - cost) / (risk + cost), else: 0.0

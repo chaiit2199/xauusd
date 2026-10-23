@@ -55,10 +55,28 @@ defmodule GoldBackend.Services.InsightCache do
       {:ok, at, _} ->
         if DateTime.compare(now, at) != :lt,
           do: invalidate(data, "Setup đã hết hạn; chờ xác nhận mới.", "expired"),
-          else: expire_quote(data, now)
+          else: expire_calendar(data, now)
 
       _ ->
+        expire_calendar(data, now)
+    end
+  end
+
+  defp expire_calendar(data, now) do
+    case Map.get(data, :calendar_valid_until) do
+      nil ->
         expire_quote(data, now)
+
+      value when is_binary(value) ->
+        case DateTime.from_iso8601(value) do
+          {:ok, at, _} ->
+            if DateTime.compare(now, at) == :lt,
+              do: expire_quote(data, now),
+              else: invalidate(data, "Lịch tin đã hết hiệu lực; chờ xác minh lại.")
+
+          _ ->
+            invalidate(data, "Lịch tin chưa có thời hạn hợp lệ; chờ xác minh lại.")
+        end
     end
   end
 
@@ -99,6 +117,14 @@ defmodule GoldBackend.Services.InsightCache do
   defp expire_analysis(data, _now), do: data
 
   defp invalidate(data, reason, state \\ "paused") do
+    code =
+      cond do
+        state == "expired" -> "setup_lifetime"
+        String.contains?(reason, "Lịch tin") -> "calendar_data"
+        String.contains?(reason, "báo giá") or String.contains?(reason, "Báo giá") -> "quote"
+        true -> "m15_data"
+      end
+
     Map.merge(data, %{
       rule_action: "wait",
       ai_action: nil,
@@ -116,7 +142,13 @@ defmodule GoldBackend.Services.InsightCache do
             ),
           execution_ready: false,
           block_reason: reason,
-          summary: reason
+          summary: reason,
+          checks:
+            GoldBackend.Services.StrategyPlan.expire_checks(
+              Map.get(data.cfd_plan, :checks),
+              code,
+              reason
+            )
         })
     })
   end

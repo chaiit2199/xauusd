@@ -13,10 +13,13 @@ defmodule GoldBackend.Services.BiasEngine do
       reason: "Cần ít nhất 50 nến H1 đã đóng, hợp lệ và đủ mới.",
       locked_until: nil,
       adx: nil,
-      slope: nil
+      slope: nil,
+      data_status: "unavailable",
+      regime: "unknown"
     }
 
     unique = Enum.uniq_by(closed, & &1.open_time) == closed
+
     valid = length(closed) >= 50 and unique and Enum.all?(closed, &valid?/1)
 
     fresh =
@@ -63,7 +66,10 @@ defmodule GoldBackend.Services.BiasEngine do
         Map.merge(result, %{
           reason: reason,
           adx: Float.round(strength, 2),
-          slope: Float.round(slope, 3)
+          slope: Float.round(slope, 3),
+          data_status: "ready",
+          regime:
+            if(result.side == "neutral" and raw != "neutral", do: "transition", else: result.side)
         })
       end)
     else

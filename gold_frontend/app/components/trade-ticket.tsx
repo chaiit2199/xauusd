@@ -1,6 +1,7 @@
 import type { CfdPlan } from "../../lib/types";
 import { money, when } from "../../lib/format";
 import { DecisionPlan } from "./decision-plan";
+import { RuleChecklist } from "./rule-checklist";
 
 type TradeTicketProps = {
   plan: CfdPlan;
@@ -57,10 +58,7 @@ export function TradeTicket({ plan }: TradeTicketProps) {
       </details> : null}
       {visibleFlags?.map((flag) => <p className="banner warn" key={flag}>{flag}</p>)}
       {plan.mode === "signals_only" ? <p className="basis">Cấu hình thử nghiệm · Entry ≤ 0,30 ATR M15 · SL ≤ 5 ATR · R:R ước tính ≥ 1,5. Mỗi setup chỉ phát tín hiệu một lần.</p> : null}
-      {plan.checks ? <details className="analysis-details">
-        <summary>Kiểm tra điều kiện · {plan.checks.filter((c) => c.status !== "pass").length} chưa đạt hoặc chưa xác định</summary>
-        <ul className="ticket-notes">{plan.checks.map((c) => <li key={c.code}>{c.status === "pass" ? "Đạt" : c.status === "unknown" ? "Chưa xác định" : "Chưa đạt"}: {c.reason}</li>)}</ul>
-      </details> : null}
+      {plan.checks ? <RuleChecklist checks={plan.checks}/> : null}
       {!plan.checks && plan.entry_guard?.blocked ? (
         <details className="analysis-details">
           <summary>Điều kiện chưa đạt · {plan.entry_guard.reasons.length}</summary>
