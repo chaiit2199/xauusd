@@ -97,7 +97,7 @@ defmodule GoldBackend.Services.AiReasonQualityTest do
       )
 
     assert snapshot.cfd_plan.action == "sell"
-    assert snapshot.ai_error =~ "khác quyết định"
+    assert snapshot.ai_error =~ "chiều khác"
   end
 
   test "AI enrichment cannot change the published price levels" do

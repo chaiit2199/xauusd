@@ -127,7 +127,7 @@ defmodule GoldBackend.Services.StrategyPipelineTest do
     ]
   end
 
-  test "ready setup is not vetoed by RSI 53, opposing AI or headline conflict" do
+  test "ready setup is not vetoed by RSI; AI may wait but cannot flip side" do
     setup = SetupEngine.assess(triggered(), @bias, [@zone, @resistance], @now)
     i = %{current_price: 101.0, sma_20: 100.0, macd: 1.0, rsi_14: 53.0}
 
@@ -145,12 +145,26 @@ defmodule GoldBackend.Services.StrategyPipelineTest do
     assert plan.action == "buy"
     assert plan.spread_source == "assumed"
     assert plan.soft_flags != []
-    assert Enum.all?(plan.checks, &(&1.status == "pass"))
 
-    for result <- [{:error, "timeout"}, {:ok, :sell, "khác chiều"}, {:ok, :buy, "quá ngắn"}] do
-      updated = InsightCache.apply_commentary(%{cfd_plan: plan}, result)
-      assert updated.cfd_plan == plan
-      assert updated.ai_status == "error"
+    reason =
+      "Cấu trúc M15 ủng hộ mua tại vùng hỗ trợ với động lượng còn dương. Chỉ báo RSI trung tính nên cần theo dõi lệch entry. Tin áp lực giảm là rủi ro phụ. Xác nhận mua nếu giá giữ trên điểm vô hiệu."
+
+    wait_reason =
+      "Cấu trúc M15 còn đó nhưng tin áp lực giảm và chỉ báo chưa đồng thuận. Chưa mở lệnh khi rủi ro tin còn cao. Theo dõi điểm vô hiệu và chờ xác nhận rõ hơn. Đứng ngoài trong chu kỳ này."
+
+    updated = InsightCache.apply_commentary(%{cfd_plan: plan}, {:ok, :buy, reason})
+    assert updated.ai_action == "buy" and updated.ai_status == "ready"
+    assert InsightCache.telegram_confirmed?(updated)
+
+    veto = InsightCache.apply_commentary(%{cfd_plan: plan}, {:ok, :wait, wait_reason})
+    assert veto.ai_action == "wait" and veto.ai_status == "ready"
+    refute InsightCache.telegram_confirmed?(veto)
+
+    for result <- [{:error, "timeout"}, {:ok, :sell, reason}, {:ok, :buy, "quá ngắn"}] do
+      bad = InsightCache.apply_commentary(%{cfd_plan: plan}, result)
+      assert bad.cfd_plan == plan
+      assert bad.ai_status == "error"
+      refute InsightCache.telegram_confirmed?(bad)
     end
   end
 

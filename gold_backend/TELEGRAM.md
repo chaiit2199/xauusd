@@ -2,9 +2,10 @@
 
 Dockerfile không sao chép `rel/`, vì vậy cấu hình trong `rel/env.sh.eex` không
 được đưa vào image. Docker Compose nhận thông tin bot từ `env.sh` trên VPS.
-Luồng hiện hành gửi tín hiệu khi rule xác nhận `buy` hoặc `sell`, một lần cho mỗi
-setup. Không giới hạn một phiếu mỗi phiên. AI bổ sung bình luận sau, không giữ
-hoặc phủ quyết tín hiệu; nội dung AI chỉ được dùng khi vượt kiểm tra chất lượng.
+Luồng hiện hành: rule phát phiếu cấu trúc `buy`/`sell` → gửi setup kèm chỉ báo và
+tin cho AI → chỉ khi AI xác nhận cùng chiều và nhận định hợp lệ mới gửi Telegram,
+một lần cho mỗi setup. AI chọn Đứng ngoài hoặc lỗi chất lượng thì không gửi.
+Không giới hạn một phiếu mỗi phiên trên website/lịch sử.
 Khung gửi thông báo tách khỏi khung phân tích: `TELEGRAM_NOTIFY_HOURS=14-22`
 (mặc định, giờ Việt Nam), `all` để nhận cả ngày hoặc `22-7` cho khung qua nửa đêm.
 Website vẫn phân tích và lưu tín hiệu ngoài giờ thông báo. Tín hiệu bị bỏ qua ngoài

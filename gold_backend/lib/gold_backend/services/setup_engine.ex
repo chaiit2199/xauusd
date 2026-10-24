@@ -75,7 +75,9 @@ defmodule GoldBackend.Services.SetupEngine do
         touched =
           Enum.filter(zones, &(not Map.get(&1, :target_only, false) and Zoi.touch?(last, &1)))
 
-        sides = if bias.side == "neutral", do: ["buy", "sell"], else: [bias.side]
+        # Structure near price may produce BUY or SELL. H1 indicator bias only
+        # ranks preference and remains advisory; when H1 is neutral, only breakout–retest.
+        sides = ["buy", "sell"]
 
         candidates =
           for zone <- touched,
@@ -118,13 +120,13 @@ defmodule GoldBackend.Services.SetupEngine do
                   if(bias.side == "neutral",
                     do: "H1 trung tính; chỉ xét phá vỡ–retest M15 đã xác nhận.",
                     else:
-                      "Chờ pinbar, engulfing, sweep–reclaim hoặc phá vỡ–retest M15 phù hợp với hướng H1."
+                      "Chờ pinbar, engulfing, sweep–reclaim hoặc phá vỡ–retest M15 tại vùng gần giá."
                   )
             }
 
           true ->
-            # Evaluate every touched zone; input order must not hide a viable setup.
-            selected = Enum.max_by(candidates, &rank/1)
+            # Prefer H1-aligned candidates; counter-H1 structure still ranks if better quality.
+            selected = Enum.max_by(candidates, &rank(&1, bias))
 
             %{
               selected
@@ -250,11 +252,12 @@ defmodule GoldBackend.Services.SetupEngine do
     end
   end
 
-  defp rank(%{blocked: true}), do: {0, 0.0, 0, ""}
+  defp rank(%{blocked: true}, _bias), do: {0, 0, 0.0, 0, ""}
 
-  defp rank(s) do
+  defp rank(s, bias) do
     cost = StrategyPolicy.assumed_spread()
     quality = if s.take_profit, do: EntryQuality.assess(s, s.entry, cost)
+    aligned = if StrategyPolicy.direction_aligned?(s, bias), do: 1, else: 0
 
     tier =
       cond do
@@ -265,7 +268,7 @@ defmodule GoldBackend.Services.SetupEngine do
         true -> 1
       end
 
-    {tier, if(quality, do: quality.reward_risk, else: 0.0),
+    {tier, aligned, if(quality, do: quality.reward_risk, else: 0.0),
      Enum.count(s.supporting_evidence, & &1.supports), s.zone.id}
   end
 

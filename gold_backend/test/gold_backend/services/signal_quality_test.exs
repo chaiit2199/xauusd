@@ -124,7 +124,15 @@ defmodule GoldBackend.Services.SignalQualityTest do
   end
 
   test "notification refuses an expired quote before any network call" do
-    snapshot = %{cfd_plan: %{action: "buy"}, signal_valid_until: "2020-01-01T00:00:00Z"}
+    snapshot = %{
+      cfd_plan: %{action: "buy", entry: 2000, stop_loss: 1990, take_profit: 2020},
+      ai_action: "buy",
+      ai_status: "ready",
+      ai_insight:
+        "Cấu trúc ủng hộ mua tại hỗ trợ với động lượng còn dương. Theo dõi điểm vô hiệu và tin kinh tế. Xác nhận mua khi giá giữ trên vùng. Rủi ro đảo chiều nếu phá đáy.",
+      signal_valid_until: "2020-01-01T00:00:00Z"
+    }
+
     assert {:error, reason} = GoldBackend.Services.TelegramNotifier.notify(snapshot)
     assert reason =~ "báo giá đã quá hạn"
   end
@@ -195,13 +203,13 @@ defmodule GoldBackend.Services.SignalQualityTest do
     assert ended.id == original.id
   end
 
-  test "setup lives two candles and invalidates on structure, target, bias or news" do
+  test "setup lives two candles and invalidates on structure, target or news" do
     s = setup()
     assert SetupLifecycle.validate(s, [], @bias, ~U[2026-10-23 08:29:59Z], []).state == "ready"
     assert SetupLifecycle.validate(s, [], @bias, ~U[2026-10-23 08:30:00Z], []).state == "expired"
 
-    assert SetupLifecycle.validate(s, [], %{@bias | side: "sell"}, @now, []).state ==
-             "invalidated"
+    # Opposite H1 bias alone does not cancel a structure setup.
+    assert SetupLifecycle.validate(s, [], %{@bias | side: "sell"}, @now, []).state == "ready"
 
     b = %{open_time: ~U[2026-10-23 08:00:00Z], low: 3991.0, close: 4000.0, high: 4001.0}
 

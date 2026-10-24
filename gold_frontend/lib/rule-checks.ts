@@ -1,8 +1,8 @@
 import type { RuleCheck } from "./types";
 
 export const ruleLabels: Record<string, string> = {
-  data: "Dữ liệu OHLC", bias: "Hướng H1", m15_data: "Dữ liệu M15", zoi: "Vùng giá của setup",
-  trigger: "Xác nhận M15", direction: "Đồng hướng H1", setup_lifetime: "Thời hạn setup",
+  data: "Dữ liệu OHLC", bias: "Hướng H1", bias_regime: "Chế độ H1", m15_data: "Dữ liệu M15", zoi: "Vùng giá của setup",
+  trigger: "Xác nhận M15", direction: "Ưu tiên H1 (khuyến nghị)", setup_lifetime: "Thời hạn setup",
   structure: "Điểm vô hiệu", calendar_data: "Dữ liệu lịch tin", calendar_window: "Cửa sổ tin",
   session: "Khung giờ ưu tiên", market_open: "Hoạt động thị trường", quote: "Độ mới báo giá", entry_drift: "Lệch entry",
   current_entry: "Báo giá để kiểm tra entry hiện tại",

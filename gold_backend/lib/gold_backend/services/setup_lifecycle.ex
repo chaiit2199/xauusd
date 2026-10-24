@@ -120,8 +120,7 @@ defmodule GoldBackend.Services.SetupLifecycle do
       not StrategyPolicy.h1_ready?(bias) ->
         halt(setup, "data_unavailable", "Chưa xác minh được dữ liệu H1; tạm dừng đánh giá setup.")
 
-      not StrategyPolicy.direction_allowed?(setup, bias) ->
-        halt(setup, "invalidated", "Hướng H1 đã thay đổi; setup cũ mất hiệu lực.")
+      # H1/indicator bias is advisory for AI; do not cancel structure setups on bias flip.
 
       broken ->
         halt(setup, "invalidated", "Giá đã phá cấu trúc của setup; chờ xác nhận mới.")

@@ -195,7 +195,7 @@ defmodule GoldBackend.Services.SignalHistoryTest do
     assert hd(SignalHistory.list().items).result["status"] == "tp_first"
   end
 
-  test "older signals are invalidated by a new valid H1 direction, not by missing data" do
+  test "older signals stay active on H1 flip; missing H1 data does not invent invalidation" do
     alias GoldBackend.Services.{SetupLifecycle, SetupRegistry}
     now = DateTime.utc_now()
     formed = CandleClock.closed_at(now)
@@ -228,7 +228,8 @@ defmodule GoldBackend.Services.SignalHistoryTest do
 
     SignalHistory.reconcile(context)
     assert hd(SignalHistory.list().items).validity == "active"
+    # Indicator/H1 bias is advisory; a later opposite H1 does not cancel structure tickets.
     SignalHistory.reconcile(%{context | warmup: false, plan: %{bias: %{side: "sell", adx: 30.0}}})
-    assert hd(SignalHistory.list().items).validity == "invalidated"
+    assert hd(SignalHistory.list().items).validity == "active"
   end
 end

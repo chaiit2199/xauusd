@@ -1,6 +1,6 @@
 defmodule GoldBackend.Services.StrategyPolicy do
   @moduledoc "Versioned experimental signal parameters; no broker execution or position accounting."
-  def version, do: "zoi-v6-entry-flex"
+  def version, do: "zoi-v7-structure-ai"
   def assumed_spread, do: 0.4
   def simulation_seconds, do: 7200
   def entry_atr, do: 0.30
@@ -21,8 +21,12 @@ defmodule GoldBackend.Services.StrategyPolicy do
         Map.get(bias, :regime) != "transition" and
         Map.get(setup, :setup_kind) == "breakout_retest"
 
-  def direction_allowed?(setup, bias),
+  # Preferred H1 alignment for ranking and advisories. Structure setups may still
+  # fire against H1; indicators are context for AI, not a hard gate.
+  def direction_aligned?(setup, bias),
     do:
       h1_ready?(bias) and
         (setup.action == bias.side or neutral_breakout?(setup, bias))
+
+  def direction_allowed?(setup, bias), do: direction_aligned?(setup, bias)
 end

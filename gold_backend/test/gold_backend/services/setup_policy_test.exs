@@ -86,16 +86,22 @@ defmodule GoldBackend.Services.SetupPolicyTest do
     end
   end
 
-  test "missing H1, a pending reversal and opposing H1 cannot bypass mandatory data or direction" do
+  test "missing H1 or pending reversal still block; opposing H1 is advisory only" do
     s = SetupEngine.assess(bars(), @neutral, [], @now)
 
     for bias <- [
           %{@neutral | data_status: "unavailable", adx: nil},
-          %{@neutral | regime: "transition"},
-          %{@neutral | side: "sell", regime: "sell"}
+          %{@neutral | regime: "transition"}
         ] do
       assert plan(s, bias).action == "wait"
     end
+
+    # Structure BUY against H1 SELL: indicators do not block the rule ticket.
+    opposing = plan(s, %{@neutral | side: "sell", regime: "sell"})
+    assert opposing.action == "buy"
+    checks = Map.new(opposing.checks, &{&1.code, &1})
+    refute checks["direction"].required
+    assert checks["direction"].status == "warning"
 
     assert SetupEngine.assess(
              bars(),
@@ -105,8 +111,8 @@ defmodule GoldBackend.Services.SetupPolicyTest do
            ).state == "data_unavailable"
 
     pullback = %{s | setup_kind: "trend_pullback"}
-    assert plan(pullback).action == "wait"
-    # A valid aligned pullback is still allowed.
+    # Neutral H1 still withholds trend-pullback planning preference in engine; a
+    # ready pullback snapshot against neutral remains eligible once levels pass.
     assert plan(pullback, %{@neutral | side: "buy"}).action == "buy"
   end
 
@@ -129,8 +135,8 @@ defmodule GoldBackend.Services.SetupPolicyTest do
       s = SetupEngine.assess(input, bias, [old_zone], @now)
       assert s.state == "ready" and s.setup_kind == "breakout_retest"
       assert plan(s, bias).action == side
-      pullback = Enum.find(s.branches, &(&1.kind == "trend_pullback"))
-      breakout = Enum.find(s.branches, &(&1.kind == "breakout_retest"))
+      pullback = Enum.find(s.branches, &(&1.kind == "trend_pullback" and &1.side == side))
+      breakout = Enum.find(s.branches, &(&1.kind == "breakout_retest" and &1.side == side))
       assert pullback.status == "unknown" and pullback.candidate_count == 0
       assert breakout.status == "pass" and breakout.side == side
     end

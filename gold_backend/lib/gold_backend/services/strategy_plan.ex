@@ -1,5 +1,5 @@
 defmodule GoldBackend.Services.StrategyPlan do
-  @moduledoc "Deterministic trade decision and complete check matrix. No AI input controls this decision."
+  @moduledoc "Deterministic structure decision and check matrix. Indicators are advisory; AI gates Telegram separately."
   alias GoldBackend.Services.{EntryQuality, StrategyPolicy}
 
   def build(i, entry, opts) do
@@ -66,6 +66,11 @@ defmodule GoldBackend.Services.StrategyPlan do
       ),
       check("bias", bias.side != "neutral", bias.reason, false, "advisory"),
       check(
+        "bias_regime",
+        if(h1_ready, do: Map.get(bias, :regime) != "transition", else: nil),
+        "H1 đang chuyển hướng; chờ xác nhận bối cảnh trước khi phát phiếu cấu trúc."
+      ),
+      check(
         "m15_data",
         setup.state != "data_unavailable",
         "Cần OHLC M15 đã đóng, liên tục và đủ mới."
@@ -84,16 +89,25 @@ defmodule GoldBackend.Services.StrategyPlan do
       ),
       check(
         "direction",
-        if(ready and not neutral_breakout,
-          do: StrategyPolicy.direction_allowed?(setup, bias),
+        if(ready and h1_ready,
+          do: StrategyPolicy.direction_aligned?(setup, bias),
           else: nil
         ),
-        if(neutral_breakout,
-          do: "Breakout–retest khi H1 trung tính: không yêu cầu đồng hướng H1.",
-          else: "Lệnh hồi cần đồng hướng H1; không xét giao dịch ngược H1."
-        ),
-        not neutral_breakout,
-        "setup"
+        cond do
+          neutral_breakout ->
+            "Breakout–retest khi H1 trung tính: đồng hướng H1 không bắt buộc."
+
+          ready and h1_ready and StrategyPolicy.direction_aligned?(setup, bias) ->
+            "Setup đồng hướng H1; chỉ báo H1 là ưu tiên, không chặn cấu trúc."
+
+          ready and h1_ready ->
+            "Setup ngược H1: chỉ báo không chặn; AI sẽ nhận bias/chỉ báo kèm tin để nhận định."
+
+          true ->
+            "Đồng hướng H1 là khuyến nghị; chỉ báo không còn điều kiện bắt buộc phát phiếu."
+        end,
+        false,
+        "advisory"
       ),
       check(
         "target_structure",
@@ -277,8 +291,7 @@ defmodule GoldBackend.Services.StrategyPlan do
 
     planning_action =
       if ready and lifetime_ok == true and h1_ready and state not in ["invalidated", "expired"] and
-           not Keyword.get(opts, :warmup, false) and
-           StrategyPolicy.direction_allowed?(setup, bias),
+           not Keyword.get(opts, :warmup, false),
          do: setup.action,
          else: "wait"
 

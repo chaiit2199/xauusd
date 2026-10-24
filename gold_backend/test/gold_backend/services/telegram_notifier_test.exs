@@ -3,11 +3,14 @@ defmodule GoldBackend.Services.TelegramNotifierTest do
   import ExUnit.CaptureLog
   alias GoldBackend.Services.TelegramNotifier
 
+  @insight "Giá nằm trên SMA20, động lượng tăng. Chờ xác nhận trước khi mở vị thế và theo dõi rủi ro đảo chiều do tin kinh tế."
+
   @snapshot %{
     cfd_plan: %{action: "buy", entry: 2000, take_profit: 2020, stop_loss: 1990},
+    ai_action: "buy",
+    ai_status: "ready",
     ai_error: nil,
-    ai_insight:
-      "Giá nằm trên SMA20, động lượng tăng. Chờ xác nhận trước khi mở vị thế và theo dõi rủi ro đảo chiều do tin kinh tế."
+    ai_insight: @insight
   }
 
   setup do
@@ -58,6 +61,7 @@ defmodule GoldBackend.Services.TelegramNotifierTest do
 
     for {action, label} <- [{"buy", "Mua"}, {"sell", "Bán"}] do
       snapshot = put_in(@snapshot, [:cfd_plan, :action], action)
+      snapshot = %{snapshot | ai_action: action}
 
       snapshot =
         if action == "sell",
@@ -112,17 +116,16 @@ defmodule GoldBackend.Services.TelegramNotifierTest do
     assert log == ""
   end
 
-  test "rule tickets send even with missing or failed AI" do
-    post = fn _, body, _, _ ->
-      assert Jason.decode!(body)["text"] =~ "Giá vào lệnh:"
-      {:ok, %HTTPoison.Response{status_code: 200, body: ~s({"ok":true})}}
-    end
+  test "rule tickets without AI confirmation do not send Telegram" do
+    post = fn _, _, _, _ -> flunk("must not send without AI confirm") end
 
-    for error <- [nil, "AI timeout"] do
-      assert :ok =
-               TelegramNotifier.notify(%{@snapshot | ai_insight: nil, ai_error: error},
-                 http_post: post
-               )
+    for snapshot <- [
+          %{@snapshot | ai_insight: nil, ai_action: nil, ai_status: "error", ai_error: "AI timeout"},
+          %{@snapshot | ai_action: "wait", ai_status: "ready"},
+          %{@snapshot | ai_action: "sell", ai_status: "ready"}
+        ] do
+      assert {:error, reason} = TelegramNotifier.notify(snapshot, http_post: post)
+      assert is_binary(reason)
     end
   end
 

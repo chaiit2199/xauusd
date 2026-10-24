@@ -31,7 +31,8 @@ defmodule GoldBackend.Services.TelegramNotifier do
 
   def notify(%{cfd_plan: %{action: action}} = snapshot, opts)
       when action in ["buy", "sell"] do
-    with :ok <- validate_slot(snapshot),
+    with :ok <- validate_ai_confirm(snapshot),
+         :ok <- validate_slot(snapshot),
          :ok <- validate_ticket(snapshot),
          :ok <- validate_config(),
          true <- notification_allowed?(Keyword.get(opts, :now, DateTime.utc_now())) do
@@ -119,6 +120,20 @@ defmodule GoldBackend.Services.TelegramNotifier do
         false
     end
   end
+
+  defp validate_ai_confirm(%{cfd_plan: %{action: side}, ai_action: side, ai_status: "ready"} = snapshot)
+       when side in ["buy", "sell"] do
+    case AiDecision.validate_reason(Map.get(snapshot, :ai_insight)) do
+      {:ok, _} -> :ok
+      {:error, _} -> failure("Chưa có nhận định AI hợp lệ; không gửi Telegram chỉ theo rule.")
+    end
+  end
+
+  defp validate_ai_confirm(%{ai_action: "wait"}),
+    do: failure("AI chọn Đứng ngoài; không gửi Telegram.")
+
+  defp validate_ai_confirm(_),
+    do: failure("Chờ AI xác nhận cùng chiều setup; chỉ báo và tin đã gửi kèm để nhận định.")
 
   defp validate_slot(%{signal_valid_until: expiry} = snapshot) when is_binary(expiry) do
     with {:ok, at, _} <- DateTime.from_iso8601(expiry),
@@ -211,7 +226,7 @@ defmodule GoldBackend.Services.TelegramNotifier do
 
         _ ->
           Map.get(plan, :block_reason) ||
-            Map.get(plan, :summary, "Phiếu được xác nhận bởi rule; AI chỉ bổ sung bình luận.")
+            Map.get(plan, :summary, "Chờ nhận định AI xác nhận setup cấu trúc.")
       end
 
     (["Khuyến nghị: #{label}"] ++ levels ++ ["Lý do: #{evidence}#{reason}"])

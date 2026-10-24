@@ -52,25 +52,29 @@ là kiểm tra hình thức, không chứng minh nhận định đúng về ng�
 
 Snapshot kiểm tra lại bình luận trước khi hiển thị. Khi không hợp lệ,
 `ai_action: null` kèm `ai_error`; quyết định theo rule không bị AI thay đổi.
-Telegram kiểm tra bình luận trước khi sử dụng; nếu chưa có bình luận hợp lệ,
-thông báo dùng lý do từ rule. Không thay model hay temperature.
+Telegram chỉ gửi khi AI xác nhận cùng chiều setup (`ai_action` = buy/sell) và
+nhận định tiếng Việt hợp lệ. AI chọn Đứng ngoài hoặc lỗi chất lượng → không gửi.
+Không thay model hay temperature.
 
-## Bộ tín hiệu hiện hành: zoi-v6-entry-flex
+## Bộ tín hiệu hiện hành: zoi-v7-structure-ai
 
-V6 thử làm mềm riêng ngưỡng lệch entry, kế thừa các điều kiện an toàn của v5.
-Không thêm migration; version mới tách thống kê khỏi các phiên bản trước.
+V7 bỏ chỉ báo khỏi điều kiện bắt buộc phát phiếu cấu trúc; AI nhận chỉ báo + tin
+để xác nhận trước khi Telegram. Kế thừa an toàn entry của v6. Không thêm migration;
+version mới tách thống kê khỏi các phiên bản trước.
 
-- `entry_drift` là khuyến nghị: lệch bất lợi >0,30 ATR₀ hiển thị “Entry muộn”.
-  BUY/SELL vẫn bắt buộc báo giá ≤120 giây, xác nhận M15, H1 phù hợp nhánh,
-  lịch tin hợp lệ, ngoài cửa sổ tin, setup còn hiệu lực, cấu trúc và SL/TP đúng,
-  SL ≤5 ATR₀, R:R sau chi phí tới TP **và cản đầu tiên** ≥1,5.
-- Khoảng entry không còn cắt tại ngưỡng 0,30 ATR; chỉ mở tới giới hạn cấu trúc,
-  trần SL và R:R. Không dịch entry gốc, ATR₀, SL, TP hoặc thời hạn 30 phút.
-- Nhánh hồi và breakout–retest tiếp tục được đánh giá độc lập, cả BUY và SELL
-  theo H1 hoặc breakout khi H1 trung tính đủ dữ liệu. Không có nhánh ngược H1
-  hoặc breakout chưa retest. FE hiển thị kết quả từng nhánh tại nến đóng được ghi
-  trên kế hoạch; đây là snapshot lúc xét setup, không phải mọi nhánh đều đã đủ
-  dữ liệu/điều kiện phát tín hiệu. Dữ liệu thiếu có phần chặn riêng trên checklist.
+- Rule phát BUY/SELL từ cấu trúc M15 gần giá (hồi hoặc breakout–retest). Chỉ báo
+  H1 (SMA/MACD/RSI…) và đồng hướng H1 là **khuyến nghị / xếp hạng**, không chặn
+  phiếu. H1 trung tính vẫn chỉ xét breakout–retest.
+- Khi có phiếu cấu trúc: gửi setup + chỉ báo + tin/lịch cho model. AI chỉ được
+  xác nhận cùng chiều hoặc Đứng ngoài; không đổi Entry/SL/TP và không lật chiều.
+- Telegram chờ AI xác nhận cùng chiều. Lịch sử tín hiệu vẫn lưu theo rule khi
+  phát phiếu lần đầu.
+- `entry_drift` vẫn là khuyến nghị. BUY/SELL rule vẫn bắt buộc báo giá ≤120 giây,
+  xác nhận M15, lịch tin hợp lệ, ngoài cửa sổ tin, setup còn hiệu lực, cấu trúc
+  và SL/TP đúng, SL ≤5 ATR₀, R:R sau chi phí tới TP **và cản đầu tiên** ≥1,5.
+- Khoảng entry không cắt tại 0,30 ATR; chỉ mở tới giới hạn cấu trúc, trần SL và R:R.
+- Nhánh hồi và breakout–retest được xét độc lập cả BUY và SELL; ưu tiên đồng hướng
+  H1 khi xếp hạng. Breakout chưa retest vẫn không vào.
 - Phiếu phát lần đầu lưu `entry_admission`: `late_entry` (nhận thêm nhờ nới ngưỡng)
   hoặc `reference_band`. Phiếu cũ không có trường này là `unclassified`; không
   suy ngược bằng giá hiện tại. Nhóm được giữ nguyên khi đánh giá lại cùng setup.
@@ -95,9 +99,9 @@ Không thêm migration; version mới tách thống kê khỏi các phiên bản
   không có báo giá mới. Quote dùng `updatedAt` của endpoint này, không dùng giờ
   đóng nến hay giờ nhận HTTP. Không đổi ngưỡng 120 giây.
 - `planning_action` là hướng kế hoạch theo setup đã xác nhận; `action` vẫn là
-  quyết định có đủ điều kiện phát tín hiệu tại giá hiện tại. Chỉ `action=buy/sell`
-  được lưu vào lịch sử tín hiệu, gọi AI hoặc gửi Telegram. Kế hoạch chờ quote
-  không chiếm ID phát tín hiệu; sau khi có quote được xét lại cùng setup.
+  quyết định rule đủ điều kiện tại giá hiện tại. Chỉ `action=buy/sell` được lưu
+  lịch sử và gọi AI; Telegram thêm điều kiện AI xác nhận cùng chiều. Kế hoạch chờ
+  quote không chiếm ID phát tín hiệu; sau khi có quote được xét lại cùng setup.
 - `quote` chuyển thành cảnh báo ở bước lập kế hoạch. Check `current_entry`
   vẫn bắt buộc có quote đủ mới. Thiếu quote: `current_entry_status=unchecked`,
   `setup_status=awaiting_quote` nếu các dữ liệu lập kế hoạch đã sẵn sàng;
@@ -465,4 +469,4 @@ docker exec xauusd-api-1 /app/bin/gold_backend rpc \
 Lệnh này vẫn thực hiện các bước chuẩn bị dữ liệu/dịch tiêu đề thường lệ. Kết quả
 thành công là `{:ok, action, "nhận định tiếng Việt..."}`; `action` có thể là
 `:buy`, `:sell` hoặc `:wait`. `Tin tức xung đột` chỉ là nhãn phân loại tin tức, không phải lỗi
-tiếng Việt. Telegram chỉ gửi tín hiệu Buy/Sell mới theo rule, không gửi khi chờ.
+tiếng Việt. Telegram chỉ gửi khi AI xác nhận cùng chiều Buy/Sell, không gửi khi chờ.

@@ -242,11 +242,7 @@ defmodule GoldBackend.Services.InsightCache do
       :ets.insert(@table, {:snapshot, snapshot})
 
       if context do
-        # Publish first. Slow AI and Telegram cannot hold up the market-data worker.
-        Task.Supervisor.start_child(GoldBackend.TaskSupervisor, fn ->
-          TelegramNotifier.notify(snapshot)
-        end)
-
+        # Structure signal publishes first. Telegram waits for AI confirm (same buy/sell).
         Task.Supervisor.start_child(GoldBackend.TaskSupervisor, fn ->
           result = AiDecision.analyze(context)
 
@@ -376,7 +372,14 @@ defmodule GoldBackend.Services.InsightCache do
       [{:snapshot, snapshot}] ->
         if snapshot.analysis_candle_closed_at == candle and snapshot.cfd_plan.action == action and
              candle == DateTime.to_iso8601(CandleClock.closed_at(DateTime.utc_now())) do
-          :ets.insert(@table, {:snapshot, apply_commentary(snapshot, result)})
+          updated = apply_commentary(snapshot, result)
+          :ets.insert(@table, {:snapshot, updated})
+
+          if telegram_confirmed?(updated) do
+            Task.Supervisor.start_child(GoldBackend.TaskSupervisor, fn ->
+              TelegramNotifier.notify(updated)
+            end)
+          end
         end
 
       _ ->
@@ -386,25 +389,50 @@ defmodule GoldBackend.Services.InsightCache do
     {:noreply, state}
   end
 
-  def apply_commentary(snapshot, {:ok, action, reason}) do
-    if to_string(action) == snapshot.cfd_plan.action do
-      case AiDecision.validate_reason(reason) do
-        {:ok, text} ->
-          Map.merge(snapshot, %{
-            ai_action: to_string(action),
-            ai_insight: text,
-            ai_error: nil,
-            ai_status: "ready"
-          })
+  def telegram_confirmed?(%{cfd_plan: %{action: side}, ai_action: side, ai_insight: text, ai_status: "ready"})
+      when side in ["buy", "sell"] and is_binary(text),
+      do: true
 
-        {:error, error} ->
-          apply_commentary(snapshot, {:error, error})
-      end
-    else
-      apply_commentary(
-        snapshot,
-        {:error, "Bình luận AI khác quyết định rule; không sử dụng bình luận."}
-      )
+  def telegram_confirmed?(_), do: false
+
+  def apply_commentary(snapshot, {:ok, action, reason}) do
+    rule = snapshot.cfd_plan.action
+    decided = to_string(action)
+
+    cond do
+      decided == rule ->
+        case AiDecision.validate_reason(reason) do
+          {:ok, text} ->
+            Map.merge(snapshot, %{
+              ai_action: decided,
+              ai_insight: text,
+              ai_error: nil,
+              ai_status: "ready"
+            })
+
+          {:error, error} ->
+            apply_commentary(snapshot, {:error, error})
+        end
+
+      decided == "wait" and rule in ["buy", "sell"] ->
+        case AiDecision.validate_reason(reason) do
+          {:ok, text} ->
+            Map.merge(snapshot, %{
+              ai_action: "wait",
+              ai_insight: text,
+              ai_error: nil,
+              ai_status: "ready"
+            })
+
+          {:error, error} ->
+            apply_commentary(snapshot, {:error, error})
+        end
+
+      true ->
+        apply_commentary(
+          snapshot,
+          {:error, "AI đề xuất chiều khác setup cấu trúc; không sử dụng nhận định."}
+        )
     end
   end
 
