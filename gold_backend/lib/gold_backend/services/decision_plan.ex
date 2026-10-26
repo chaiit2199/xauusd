@@ -41,11 +41,11 @@ defmodule GoldBackend.Services.DecisionPlan do
       branches_at: Map.get(setup, :candle_closed_at),
       setup_kind: Map.get(setup, :setup_kind),
       entry_admission: Map.get(plan, :entry_admission),
-      entry_policy: "rr_constrained",
+      entry_policy: "scalp_zone",
       cost_sensitivity: cost_sensitivity(setup, plan.entry, plan.spread),
       evidence: [
         plan.bias.reason,
-        "H1 đóng #{indicators.current_price}; SMA20 #{indicators.sma_20}; MACD #{indicators.macd}.",
+        "#{Map.get(plan, :indicator_timeframe, "H1")} đóng #{indicators.current_price}; SMA20 #{indicators.sma_20}; MACD #{indicators.macd}.",
         if(zone,
           do: "Vùng #{zone_name(zone.id)}: #{round2(zone.low)}–#{round2(zone.high)}.",
           else: "Chưa xác định được vùng giá phù hợp."
@@ -60,19 +60,21 @@ defmodule GoldBackend.Services.DecisionPlan do
           else: plan.block_reason || setup.reason
         ),
       trigger:
-        "Một mẫu M15 hợp lệ là đủ. Lệnh hồi cần cùng hướng H1; breakout–retest được xét cả khi H1 trung tính nhưng đủ dữ liệu. Giá mới, lịch tin, điểm vô hiệu và R:R vẫn bắt buộc.",
+        "Một mẫu M15 hợp lệ là đủ. H1 là bối cảnh; xét độc lập lệnh hồi, đảo chiều và breakout–retest. Giá mới, lịch tin, điểm vô hiệu và R:R vẫn bắt buộc.",
       stop_loss: stop,
       stop_reason:
         if(is_number(stop),
-          do: "Ngoài cực trị nến xác nhận và mép vùng giá, cộng đệm 0,10 ATR M15.",
+          do: "Ngoài cực trị nến chạm, nến xác nhận và mép vùng giá, cộng đệm ATR.",
           else: "Chờ nến xác nhận để cố định điểm vô hiệu và SL."
         ),
       take_profit: target,
+      take_profit_2: Map.get(setup, :take_profit_2),
+      invalidation: Map.get(setup, :invalidation_price),
       target_reason:
         if(barrier && is_number(target),
           do:
             "Mép gần vùng #{zone_name(barrier.id)} (#{round2(barrier.low)}–#{round2(barrier.high)}), đã biết trước nến xác nhận.",
-          else: "Chưa có vùng cản đã xác nhận để chốt TP."
+          else: "Mục tiêu scalp 5 USD; chưa thấy vùng cản trong dữ liệu cấu trúc hiện có."
         ),
       reward_risk:
         if(live and confirmed and is_number(target) and valid_price?(setup, plan.entry),
@@ -86,7 +88,7 @@ defmodule GoldBackend.Services.DecisionPlan do
         if(live,
           do: "R:R tại báo giá mới của nguồn; đánh giá lại khi giá thay đổi.",
           else:
-            "Chưa kiểm tra entry hiện tại. R:R tham chiếu dùng giá đóng nến xác nhận; không chứng minh còn vào được."
+            "Chưa kiểm tra entry hiện tại. R:R tham chiếu dùng entry trong vùng setup; không chứng minh còn vào được."
         ),
       cost: %{
         spread: plan.spread,
@@ -107,49 +109,40 @@ defmodule GoldBackend.Services.DecisionPlan do
           else: "Giá phá vùng cấu trúc hoặc chạm SL của setup."
         ),
         "Giá chạm mục tiêu trước khi sử dụng tín hiệu.",
-        "H1 không còn phù hợp với nhánh setup hoặc setup đi qua cửa sổ tin quan trọng.",
+        "Trong cửa sổ tin quan trọng, giữ plan nhưng không vào lệnh.",
         "Giá/dữ liệu quá hạn: tạm dừng và đánh giá lại."
       ],
       simulation_seconds: StrategyPolicy.simulation_seconds()
     }
   end
 
-  def entry_zone(%{take_profit: target} = s, cost) when is_number(target) do
+  def entry_zone(
+        %{zone: %{low: low, high: high}, stop_loss: stop, take_profit: target, action: side} =
+          setup,
+        cost
+      )
+      when is_number(target) do
     r = StrategyPolicy.min_reward_risk()
-    # The 0.30 ATR band is advisory in v6. The nearest barrier still constrains
-    # the interval even if a future target policy chooses a more distant TP.
-    barrier = Map.get(s, :barrier)
 
     target =
-      if barrier do
-        if s.action == "buy", do: min(target, barrier.low), else: max(target, barrier.high)
-      else
-        target
+      case Map.get(setup, :barrier) do
+        %{low: barrier_low, high: barrier_high} ->
+          if side == "buy", do: min(target, barrier_low), else: max(target, barrier_high)
+
+        _ ->
+          target
       end
 
-    breakout = Map.get(s, :setup_kind) == "breakout_retest"
-
-    if s.action == "buy" do
-      low = if breakout, do: s.stop_loss + 0.01, else: max(s.stop_loss + 0.01, s.zone.low + 0.01)
-
-      high =
-        Enum.min([
-          s.stop_loss + StrategyPolicy.max_stop_atr() * s.atr,
-          (target + r * s.stop_loss) / (1 + r) - cost
-        ])
-
-      range(low, high)
+    if side == "buy" do
+      range(
+        max(low + 0.01, stop + 0.01),
+        Enum.min([high, stop + 5.0, target - 5.0, (target + r * stop) / (1 + r) - cost])
+      )
     else
-      low =
-        Enum.max([
-          s.stop_loss - StrategyPolicy.max_stop_atr() * s.atr,
-          (target + r * s.stop_loss) / (1 + r) + cost
-        ])
-
-      high =
-        if breakout, do: s.stop_loss - 0.01, else: min(s.stop_loss - 0.01, s.zone.high - 0.01)
-
-      range(low, high)
+      range(
+        Enum.max([low, stop - 5.0, target + 5.0, (target + r * stop) / (1 + r) + cost]),
+        min(high - 0.01, stop - 0.01)
+      )
     end
   end
 

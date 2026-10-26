@@ -9,7 +9,13 @@ config :gold_backend, :ollama,
   num_predict: String.to_integer(System.get_env("OLLAMA_NUM_PREDICT", "800"))
 
 config :gold_backend, :metals_dev_api_key, System.get_env("METALS_DEV_API_KEY")
-config :gold_backend, :gold_api_key, System.get_env("GOLD_API_KEY", "21f697af990c27a6a6b8e89db65fa2359bbf03d621d0bbbd9ca657b61aaf1519")
+
+config :gold_backend,
+       :gold_api_key,
+       System.get_env(
+         "GOLD_API_KEY",
+         "21f697af990c27a6a6b8e89db65fa2359bbf03d621d0bbbd9ca657b61aaf1519"
+       )
 
 config :gold_backend,
        :cors_origins,
@@ -59,3 +65,6 @@ end
 config :gold_backend, :telegram,
   bot_token: System.get_env("TELEGRAM_BOT_TOKEN"),
   chat_id: System.get_env("TELEGRAM_CHAT_ID")
+
+# Optional: provider must support genuine 5-minute OHLC and sufficient quota.
+config :gold_backend, :m5_enabled, System.get_env("GOLD_M5_ENABLED", "false") == "true"

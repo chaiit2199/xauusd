@@ -35,7 +35,6 @@ defmodule GoldBackend.Services.SignalHistory do
 
   def reconcile(%{warmup: true}), do: :ok
   def reconcile(%{m15_setup: %{state: "data_unavailable"}}), do: :ok
-  def reconcile(%{plan: %{bias: %{adx: nil}}}), do: :ok
 
   def reconcile(context) do
     rows =
@@ -53,7 +52,10 @@ defmodule GoldBackend.Services.SignalHistory do
       updated =
         GoldBackend.Services.SetupLifecycle.validate(
           setup,
-          context.m15_candles,
+          if(Map.get(setup, :timeframe_seconds) == 300,
+            do: Map.get(context, :m5_candles, []),
+            else: context.m15_candles
+          ),
           context.plan.bias,
           context.analysis_at,
           context.events
@@ -80,6 +82,7 @@ defmodule GoldBackend.Services.SignalHistory do
   end
 
   def refresh(now \\ DateTime.utc_now()) do
+    refresh_candidates(now)
     # Retain settled outcomes forever; retry missing observations for seven days.
     cutoff = DateTime.add(now, -7, :day)
 
@@ -106,7 +109,8 @@ defmodule GoldBackend.Services.SignalHistory do
       )
 
     Enum.each(rows, fn row ->
-      if row.result["status"] in [nil, "pending_entry", "entry_touched", "data_gap"] do
+      if row.result["status"] in [nil, "pending_entry", "entry_touched", "data_gap"] or
+           (row.result["status"] == "tp_first" and row.result["tp2_status"] == "pending") do
         plan = row.plan
         zone = plan["decision_plan"]["entry_zone"]
 
@@ -119,7 +123,9 @@ defmodule GoldBackend.Services.SignalHistory do
           entry_low: zone["low"],
           entry_high: zone["high"],
           stop_loss: plan["stop_loss"],
-          take_profit: plan["take_profit"]
+          take_profit: plan["take_profit"],
+          take_profit_2: plan["decision_plan"]["take_profit_2"],
+          invalidation: plan["decision_plan"]["invalidation"]
         }
 
         bars =
@@ -137,6 +143,72 @@ defmodule GoldBackend.Services.SignalHistory do
         Repo.update_all(from(o in "signal_outcomes", where: o.setup_id == ^row.id),
           set: [result: result, updated_at: now]
         )
+      end
+    end)
+
+    :ok
+  end
+
+  # Research-only replay of every structurally accepted candidate. This does not
+  # imply an actual fill; simulation requires complete subsequent M15 bars.
+  def refresh_candidates(now) do
+    cutoff = DateTime.add(now, -7, :day)
+
+    rows =
+      Repo.all(
+        from c in "strategy_candidates",
+          where: c.first_seen_at >= ^cutoff,
+          select: %{id: c.setup_id, snapshot: c.snapshot, result: c.result}
+      )
+
+    Enum.each(rows, fn row ->
+      c = row.snapshot
+      zone = c["entry_zone"]
+      status = if row.result, do: row.result["status"]
+
+      retry? =
+        status in [nil, "pending_entry", "entry_touched", "data_gap"] or
+          (status == "tp_first" and row.result["tp2_status"] == "pending")
+
+      with true <- retry?,
+           false <- c["blocked"],
+           %{"low" => low, "high" => high} <- zone,
+           {:ok, formed, _} <- DateTime.from_iso8601(c["formed_at"] || ""),
+           {:ok, expiry, _} <- DateTime.from_iso8601(c["expires_at"] || ""),
+           true <- is_number(c["stop_loss"]) and is_number(c["take_profit"]) do
+        horizon = DateTime.add(formed, StrategyPolicy.simulation_seconds())
+
+        s = %{
+          published_at: formed,
+          entry_expires_at: expiry,
+          horizon_at: horizon,
+          cancelled_at: nil,
+          side: c["action"],
+          entry_low: low,
+          entry_high: high,
+          stop_loss: c["stop_loss"],
+          take_profit: c["take_profit"],
+          take_profit_2: c["take_profit_2"],
+          invalidation: c["invalidation_price"]
+        }
+
+        bars =
+          Repo.all(
+            from b in MarketCandle,
+              where:
+                b.source == "gold_api_ohlc" and b.timeframe == 900 and b.open_time >= ^formed and
+                  b.open_time < ^horizon,
+              order_by: b.open_time
+          )
+          |> Enum.map(&MarketCandle.to_bar/1)
+
+        result = SignalSimulator.evaluate(s, bars, now) |> Jason.encode!() |> Jason.decode!()
+
+        Repo.update_all(from(c in "strategy_candidates", where: c.setup_id == ^row.id),
+          set: [result: result]
+        )
+      else
+        _ -> :ok
       end
     end)
 
@@ -207,7 +279,57 @@ defmodule GoldBackend.Services.SignalHistory do
       limit: limit,
       model: "m15-touch-v1",
       summary: Enum.frequencies_by(items, & &1.result["status"]),
-      groups: summarize_groups(items)
+      groups: summarize_groups(items),
+      candidates: candidate_summary()
+    }
+  end
+
+  def candidate_summary do
+    rows =
+      Repo.all(
+        from c in "strategy_candidates",
+          left_join: o in "signal_outcomes",
+          on: c.setup_id == o.setup_id,
+          left_join: i in "strategy_invalidations",
+          on: c.setup_id == i.setup_id,
+          select: %{
+            snapshot: c.snapshot,
+            plan_ready: c.plan_ready,
+            ready_to_enter: c.ready_to_enter,
+            result: c.result,
+            published_result: o.result,
+            invalidation: i.state
+          }
+      )
+
+    groups =
+      rows
+      |> Enum.group_by(fn row -> {row.snapshot["action"], row.snapshot["setup_kind"]} end)
+      |> Enum.map(fn {{side, kind}, entries} ->
+        %{
+          side: side,
+          setup_type: kind,
+          candidates: length(entries),
+          plan_ready: Enum.count(entries, & &1.plan_ready),
+          ready_to_enter: Enum.count(entries, & &1.ready_to_enter),
+          invalidated: Enum.count(entries, &(&1.invalidation == "invalidated")),
+          expired: Enum.count(entries, &(&1.invalidation == "expired")),
+          tp1_hit: Enum.count(entries, &(is_map(&1.result) and &1.result["tp1_hit"] == true)),
+          tp2_hit: Enum.count(entries, &(is_map(&1.result) and &1.result["tp2_status"] == "hit")),
+          outcomes:
+            entries
+            |> Enum.reject(&is_nil(&1.result))
+            |> Enum.frequencies_by(& &1.result["status"])
+        }
+      end)
+
+    %{
+      count: length(rows),
+      plan_ready: Enum.count(rows, & &1.plan_ready),
+      ready_to_enter: Enum.count(rows, & &1.ready_to_enter),
+      groups: groups,
+      note:
+        "Mô phỏng chạm giá M15 sau khi candidate hình thành, không xác nhận khớp lệnh; nến thiếu hoặc thứ tự mơ hồ không tính WIN/LOSS."
     }
   end
 

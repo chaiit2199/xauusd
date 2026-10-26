@@ -54,10 +54,12 @@ defmodule GoldBackend.Services.StrategyPlan do
           end
       end
 
+    eligible_zone = if ready, do: GoldBackend.Services.DecisionPlan.entry_zone(setup, spread)
+
     checks = [
       check(
         "data",
-        not Keyword.get(opts, :warmup, false) and h1_ready,
+        not Keyword.get(opts, :warmup, false),
         Keyword.get(opts, :warmup_detail) ||
           if(h1_ready,
             do: "Dữ liệu OHLC đã sẵn sàng.",
@@ -68,7 +70,9 @@ defmodule GoldBackend.Services.StrategyPlan do
       check(
         "bias_regime",
         if(h1_ready, do: Map.get(bias, :regime) != "transition", else: nil),
-        "H1 đang chuyển hướng; chờ xác nhận bối cảnh trước khi phát phiếu cấu trúc."
+        "H1 đang chuyển hướng; đây là cảnh báo bối cảnh.",
+        false,
+        "advisory"
       ),
       check(
         "m15_data",
@@ -170,11 +174,8 @@ defmodule GoldBackend.Services.StrategyPlan do
       ),
       check(
         "market_open",
-        if(GoldBackend.Services.MarketSchedule.open?(now),
-          do: if(quote_ok, do: true, else: nil),
-          else: false
-        ),
-        "Ngoài khoảng nghỉ đã cấu hình và có báo giá mới để xác nhận nguồn đang cập nhật."
+        GoldBackend.Services.MarketSchedule.open?(now),
+        "Thị trường nằm ngoài thời gian nghỉ đã cấu hình."
       ),
       check(
         "quote",
@@ -217,12 +218,25 @@ defmodule GoldBackend.Services.StrategyPlan do
       check(
         "levels",
         if(quality, do: quality.levels_ok, else: nil),
-        "Entry phải nằm giữa SL/TP; SL không vượt 5 ATR M15."
+        "Entry phải nằm giữa SL/TP; SL không vượt 5 USD/oz."
+      ),
+      check(
+        "entry_zone",
+        if(quality,
+          do: eligible_zone != nil and entry >= eligible_zone.low and entry <= eligible_zone.high,
+          else: nil
+        ),
+        "Chờ giá quay lại vùng entry phù hợp."
       ),
       check(
         "reward_risk",
-        if(quality, do: quality.reward_risk_ok and barrier_room?(setup, entry, spread), else: nil),
-        "R:R ước tính tới TP và cản đầu tiên phải ≥ 1,5 sau chi phí; gộp kiểm tra khi TP chính là mép cản."
+        if(quality,
+          do:
+            quality.reward_risk_ok and quality.reward >= 5.0 - 1.0e-9 and
+              barrier_room?(setup, entry, spread),
+          else: nil
+        ),
+        "R:R thấp cần chờ retest; ước tính sau chi phí."
       )
     ]
 
@@ -233,7 +247,14 @@ defmodule GoldBackend.Services.StrategyPlan do
         do: checks,
         else:
           Enum.map(checks, fn c ->
-            if c.code in ["setup_target", "structure", "entry_drift", "levels", "reward_risk"] do
+            if c.code in [
+                 "setup_target",
+                 "structure",
+                 "entry_drift",
+                 "levels",
+                 "reward_risk",
+                 "entry_zone"
+               ] do
               Map.merge(c, %{
                 status: "unknown",
                 scope: "current_entry",
@@ -258,7 +279,7 @@ defmodule GoldBackend.Services.StrategyPlan do
         lifetime_ok == false ->
           "expired"
 
-        Keyword.get(opts, :warmup, false) or not h1_ready or setup.state == "data_unavailable" or
+        Keyword.get(opts, :warmup, false) or setup.state == "data_unavailable" or
             not calendar_ok ->
           "paused"
 
@@ -278,7 +299,9 @@ defmodule GoldBackend.Services.StrategyPlan do
           "awaiting_quote"
 
         quality &&
-            (not quality.reward_risk_ok or
+            (is_nil(eligible_zone) or entry < eligible_zone.low or entry > eligible_zone.high or
+               not quality.levels_ok or not quality.reward_risk_ok or
+               quality.reward < 5.0 - 1.0e-9 or
                not barrier_room?(setup, entry, spread)) ->
           "wait_pullback"
 
@@ -290,7 +313,7 @@ defmodule GoldBackend.Services.StrategyPlan do
       end
 
     planning_action =
-      if ready and lifetime_ok == true and h1_ready and state not in ["invalidated", "expired"] and
+      if ready and lifetime_ok == true and state not in ["invalidated", "expired"] and
            not Keyword.get(opts, :warmup, false),
          do: setup.action,
          else: "wait"
@@ -303,8 +326,50 @@ defmodule GoldBackend.Services.StrategyPlan do
         true -> "blocked"
       end
 
+    entry_status =
+      cond do
+        state == "expired" ->
+          "EXPIRED"
+
+        state == "invalidated" ->
+          "INVALIDATED"
+
+        event && ready ->
+          "NEWS_BLOCKED"
+
+        ready && !quote_ok ->
+          "WAIT_LIVE_QUOTE"
+
+        action in ["buy", "sell"] ->
+          "READY_TO_ENTER"
+
+        ready && quality &&
+            (is_nil(eligible_zone) || entry < eligible_zone.low || entry > eligible_zone.high ||
+               !quality.reward_risk_ok || !quality.levels_ok || quality.reward < 5.0 - 1.0e-9) ->
+          "WAIT_RETEST"
+
+        ready && quality && !quality.drift_ok ->
+          "PLAN_VALID_BUT_PRICE_MOVED"
+
+        ready ->
+          "PLAN_READY"
+
+        true ->
+          "WATCHING"
+      end
+
     warnings =
       []
+      |> warn(ready and abs(setup.entry - setup.stop_loss) > 3, "SL rộng hơn scalp target.")
+      |> warn(
+        quality != nil and quality.reward_risk >= 1.2 and quality.reward_risk < 1.5,
+        "R:R phù hợp scalp nhưng thấp hơn 1.5."
+      )
+      |> warn(
+        ready and bias.side in ["buy", "sell"] and bias.side != setup.action,
+        "Countertrend setup — ngược bias H1, ưu tiên mục tiêu ngắn."
+      )
+      |> warn(quality != nil and not quality.drift_ok, "Lệch entry lớn hơn 0.30 ATR.")
       |> warn(
         not observed?,
         "Spread 0,40 USD là giả định; nguồn hiện tại chưa cung cấp bid/ask của sàn."
@@ -340,11 +405,13 @@ defmodule GoldBackend.Services.StrategyPlan do
     plan = %{
       instrument: "XAUUSD",
       market: "CFD",
-      timeframe: "M15",
+      timeframe: if(Map.get(setup, :timeframe_seconds) == 300, do: "M5", else: "M15"),
       trend_timeframe: "H1",
+      indicator_timeframe: Keyword.get(opts, :indicator_timeframe, "H1"),
       strategy_version: StrategyPolicy.version(),
       mode: "signals_only",
       planning_action: planning_action,
+      trade_plan_status: entry_status,
       current_entry_status: current_entry_status,
       price_basis: if(quote_ok, do: "live_quote", else: "m15_close"),
       quote_at: if(quote_ok, do: DateTime.to_iso8601(quote.timestamp)),
@@ -395,16 +462,55 @@ defmodule GoldBackend.Services.StrategyPlan do
       entry_guard: %{blocked: reasons != [], reasons: reasons},
       summary: "#{label} · #{setup.reason}",
       setup_kind: Map.get(setup, :setup_kind),
+      candidate_log: Map.get(setup, :candidate_log, []),
       notes: warnings,
       watchlist: [],
       session_key: "#{Date.to_iso8601(DateTime.to_date(local))}:all_sessions",
       news_digest: Keyword.get(opts, :news_bias, %{}) |> Map.get(:digest),
       news_tone: Keyword.get(opts, :news_bias, %{}) |> Map.get(:tone_label),
       rule_commentary:
-        "H1: #{label}. Giá đóng #{i.current_price}; SMA20 #{i.sma_20}; MACD #{i.macd}; RSI #{i.rsi_14}.\n#{bias.reason}\nM15: #{setup.reason}\n#{if reasons == [], do: "Rule đã đủ điều kiện phát phiếu.", else: "Chưa mở lệnh: " <> Enum.join(reasons, " ")}"
+        "H1: #{label}. Chỉ báo #{Keyword.get(opts, :indicator_timeframe, "H1")}: giá đóng #{i.current_price}; SMA20 #{i.sma_20}; MACD #{i.macd}; RSI #{i.rsi_14}.\n#{bias.reason}\nM15: #{setup.reason}\n#{if reasons == [], do: "Rule đã đủ điều kiện phát phiếu.", else: "Chưa mở lệnh: " <> Enum.join(reasons, " ")}"
+    }
+
+    structured = %{
+      direction: if(ready, do: String.upcase(setup.action)),
+      setup_type: Map.get(setup, :setup_kind),
+      context: %{
+        h1_bias: bias.side,
+        m15_structure: Map.get(setup, :technical_context),
+        countertrend: ready and bias.side in ["buy", "sell"] and setup.action != bias.side
+      },
+      entry: %{
+        zone_low: if(eligible_zone, do: eligible_zone.low),
+        zone_high: if(eligible_zone, do: eligible_zone.high),
+        reference: if(ready, do: setup.entry),
+        current_price: if(quote_ok, do: entry),
+        status: entry_status
+      },
+      risk: %{
+        stop_loss: if(ready, do: setup.stop_loss),
+        stop_distance: if(ready, do: round2(abs(setup.entry - setup.stop_loss))),
+        invalidation: Map.get(setup, :invalidation_price),
+        tp1: Map.get(setup, :take_profit),
+        tp2: Map.get(setup, :take_profit_2),
+        reward_to_tp1:
+          if(ready and is_number(setup.take_profit),
+            do: round2(abs(setup.take_profit - setup.entry))
+          ),
+        reward_to_tp2:
+          if(ready and is_number(Map.get(setup, :take_profit_2)),
+            do: round2(abs(setup.take_profit_2 - setup.entry))
+          ),
+        estimated_rr: if(quality, do: round2(quality.reward_risk))
+      },
+      status: entry_status,
+      warnings: warnings,
+      reasons: [setup.reason],
+      blockers: reasons
     }
 
     plan
+    |> Map.put(:trade_plan, structured)
     |> Map.put(:decision_plan, GoldBackend.Services.DecisionPlan.build(plan, setup, i))
     |> Map.put(
       :stop_cap_audit,
@@ -440,7 +546,7 @@ defmodule GoldBackend.Services.StrategyPlan do
           DateTime.to_iso8601(
             GoldBackend.Services.CandleClock.closed_at(Keyword.fetch!(opts, :as_of))
           ) and
-          q != nil and q.risk > StrategyPolicy.max_stop_atr() * candidate.atr and
+          q != nil and q.risk > 5.0 and
           entry > 0 and candidate.stop_loss > 0 and candidate.take_profit > 0 and
           if(candidate.action == "buy",
             do: candidate.stop_loss < entry and entry < candidate.take_profit,
@@ -448,7 +554,8 @@ defmodule GoldBackend.Services.StrategyPlan do
           ) and
           Enum.all?(
             probe.checks,
-            &(not &1.required or &1.code == "levels" or &1.status == "pass")
+            &(not &1.required or &1.code in ["levels", "entry_zone", "reward_risk"] or
+                &1.status == "pass")
           )
 
       %{
@@ -483,6 +590,7 @@ defmodule GoldBackend.Services.StrategyPlan do
     plan =
       build(context.indicators, entry,
         bias: context.plan.bias,
+        indicator_timeframe: Map.get(context.plan, :indicator_timeframe, "H1"),
         m15_setup: context.m15_setup,
         as_of: now,
         quote: quote,
@@ -515,7 +623,7 @@ defmodule GoldBackend.Services.StrategyPlan do
       if code == "quote",
         do: [
           "current_entry",
-          "market_open",
+          "entry_zone",
           "entry_drift",
           "levels",
           "reward_risk",
@@ -577,6 +685,15 @@ defmodule GoldBackend.Services.StrategyPlan do
         entry_guard: %{blocked: true, reasons: [reason]},
         blocking_reasons: [reason],
         current_entry_status: status,
+        trade_plan_status:
+          if(status == "blocked",
+            do: String.upcase(plan.setup_status),
+            else:
+              if(String.contains?(String.downcase(reason), "báo giá"),
+                do: "WAIT_LIVE_QUOTE",
+                else: "PLAN_READY"
+              )
+          ),
         quote_at: nil,
         price_basis: "m15_close",
         entry_admission: nil,
@@ -589,6 +706,21 @@ defmodule GoldBackend.Services.StrategyPlan do
       if is_number(Map.get(plan, :reference_entry)),
         do: Map.put(plan, :entry, plan.reference_entry),
         else: plan
+
+    plan =
+      case Map.get(plan, :trade_plan) do
+        nil ->
+          plan
+
+        trade_plan ->
+          status = plan.trade_plan_status
+
+          Map.put(plan, :trade_plan, %{
+            trade_plan
+            | status: status,
+              entry: %{trade_plan.entry | status: status, current_price: nil}
+          })
+      end
 
     case Map.get(plan, :decision_plan) do
       nil ->

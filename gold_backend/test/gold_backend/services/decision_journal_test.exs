@@ -9,6 +9,48 @@ defmodule GoldBackend.Services.DecisionJournalTest do
     :ok
   end
 
+  test "each evaluation preserves the actual quote and candidate reasons" do
+    at = ~U[2026-10-23 08:00:35Z]
+
+    candidate = %{
+      id: "audit-one",
+      action: "buy",
+      blocked: true,
+      reason: "target blocked",
+      rejection_reason: "target_blocked"
+    }
+
+    plan = %{
+      setup_id: nil,
+      setup_status: "watching",
+      action: "wait",
+      quote_at: DateTime.to_iso8601(at),
+      price_basis: "live_quote",
+      entry: 4000.0,
+      candidate_log: [candidate],
+      checks: [],
+      blocking_reasons: [],
+      rule_commentary: "watching"
+    }
+
+    assert {:ok, _} = DecisionJournal.record(%{analysis_at: at, plan: plan})
+    assert {:ok, _} = DecisionJournal.record(%{analysis_at: DateTime.add(at, 5), plan: plan})
+
+    rows =
+      Repo.all(
+        from o in "strategy_observations",
+          order_by: o.id,
+          select: %{quote_at: o.quote_at, quote_price: o.quote_price, snapshot: o.snapshot}
+      )
+
+    assert length(rows) == 2
+    assert DateTime.compare(DateTime.from_naive!(hd(rows).quote_at, "Etc/UTC"), at) == :eq
+    assert Decimal.equal?(hd(rows).quote_price, Decimal.new("4000"))
+
+    assert hd(rows).snapshot["candidate_log"] |> hd() |> Map.get("rejection_reason") ==
+             "target_blocked"
+  end
+
   test "an invalidated setup stays blocked across repeated evaluations" do
     at = ~U[2026-10-23 08:00:35Z]
 

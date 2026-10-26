@@ -5,14 +5,14 @@ defmodule GoldBackend.Services.OhlcContext do
     m15 = closed(m15, 900, slot)
     h1 = closed(h1, 3600, CandleClock.closed_at(slot, 3600))
 
-    if m15 == [] or h1 == [] do
+    if m15 == [] do
       nil
     else
       latest_m15 = List.last(m15)
       latest_h1 = List.last(h1)
 
       ready =
-        length(h1) >= 50 and
+        length(h1) >= 50 and not is_nil(latest_h1) and
           DateTime.compare(
             DateTime.add(latest_h1.open_time, 3600),
             CandleClock.closed_at(slot, 3600)
@@ -29,7 +29,12 @@ defmodule GoldBackend.Services.OhlcContext do
         end)
 
       %{
-        summary: Indicators.summarize_candles(h1, 3600),
+        summary:
+          if(length(h1) >= 20,
+            do: Indicators.summarize_candles(h1, 3600),
+            else: Indicators.summarize_candles(m15, 900)
+          ),
+        summary_timeframe: if(length(h1) >= 20, do: "H1", else: "M15"),
         prices: prices,
         latest: List.last(prices),
         h1_ready: ready,

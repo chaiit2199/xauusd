@@ -86,14 +86,14 @@ defmodule GoldBackend.Services.SetupPolicyTest do
     end
   end
 
-  test "missing H1 or pending reversal still block; opposing H1 is advisory only" do
+  test "missing H1, transition and opposing H1 are advisory" do
     s = SetupEngine.assess(bars(), @neutral, [], @now)
 
     for bias <- [
           %{@neutral | data_status: "unavailable", adx: nil},
           %{@neutral | regime: "transition"}
         ] do
-      assert plan(s, bias).action == "wait"
+      assert plan(s, bias).action == "buy"
     end
 
     # Structure BUY against H1 SELL: indicators do not block the rule ticket.
@@ -108,7 +108,7 @@ defmodule GoldBackend.Services.SetupPolicyTest do
              %{@neutral | data_status: "unavailable", adx: nil},
              [],
              @now
-           ).state == "data_unavailable"
+           ).state == "ready"
 
     pullback = %{s | setup_kind: "trend_pullback"}
     # Neutral H1 still withholds trend-pullback planning preference in engine; a
@@ -151,7 +151,7 @@ defmodule GoldBackend.Services.SetupPolicyTest do
     assert [rejected] = s.rejected_candidates
     assert rejected.blocked and rejected.rejection_reason == "stop_cap"
     assert is_binary(rejected.id) and rejected.stop_loss < 50.0
-    assert rejected.take_profit > 109.0 and rejected.take_profit < 110.0
+    assert_in_delta rejected.take_profit, rejected.entry + 5.0, 0.01
   end
 
   test "a failed retest cannot be relabeled as a pullback at the newly formed breakout zone" do
@@ -162,14 +162,14 @@ defmodule GoldBackend.Services.SetupPolicyTest do
     assert SetupEngine.assess(input, bias, [], @now).blocked
   end
 
-  test "neutral H1 cannot manufacture a pinbar setup without a breakout" do
+  test "neutral H1 permits a confirmed pinbar at a valid zone" do
     input =
       bars()
       |> List.update_at(-2, &%{&1 | open: 100.0, close: 100.0, low: 99.0, high: 101.0})
       |> List.update_at(-1, &%{&1 | open: 100.0, close: 100.5, low: 97.0, high: 100.6})
 
     zone = %{id: "sma20_h1", low: 99.0, mid: 100.0, high: 101.0}
-    assert SetupEngine.assess(input, @neutral, [zone], @now).blocked
+    assert SetupEngine.assess(input, @neutral, [zone], @now).state == "ready"
   end
 
   test "retest candle cannot redefine the zone formed at the preceding breakout close" do

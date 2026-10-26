@@ -134,7 +134,7 @@ defmodule GoldBackend.Services.PlanningQuoteTest do
     assert expired.decision_plan.reward_risk == nil and expired.decision_plan.current_entry == nil
     checks = Map.new(expired.checks, &{&1.code, &1.status})
     assert checks["quote"] == "warning" and checks["trigger"] == "pass"
-    assert checks["entry_drift"] == "unknown" and checks["market_open"] == "unknown"
+    assert checks["entry_drift"] == "unknown" and checks["market_open"] == "pass"
     # Missing new M15 must not be masked by the earlier quote expiry.
     stale = InsightCache.expire_snapshot(data, ~U[2026-10-23 08:15:00Z]).cfd_plan
     assert stale.setup_status == "paused"

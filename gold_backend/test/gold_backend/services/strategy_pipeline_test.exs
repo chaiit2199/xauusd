@@ -210,15 +210,12 @@ defmodule GoldBackend.Services.StrategyPipelineTest do
            ).action == "wait"
   end
 
-  test "a confirmation without a structural target waits instead of inventing two R" do
+  test "a fixed scalp target is allowed when no structural target blocks it" do
     setup = SetupEngine.assess(triggered(), @bias, [@zone], @now)
-    assert setup.take_profit == nil
+    assert_in_delta setup.take_profit, setup.entry + 5.0, 0.01
     i = %{current_price: 101.0, sma_20: 100.0, macd: 1.0, rsi_14: 53.0}
     plan = StrategyPlan.build(i, setup.entry, options(setup))
-    assert plan.action == "wait"
-    assert plan.setup_status == "wait_target"
-    assert plan.decision_plan.take_profit == nil
-    assert plan.decision_plan.entry_zone == nil
+    assert plan.decision_plan.take_profit == setup.take_profit
     assert plan.decision_plan.cost.description =~ "giả định"
   end
 

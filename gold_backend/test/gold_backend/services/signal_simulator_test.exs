@@ -29,6 +29,36 @@ defmodule GoldBackend.Services.SignalSimulatorTest do
         changes
       )
 
+  test "TP2 observations retain ambiguity when TP2 and SL share a candle" do
+    s = Map.put(signal(), :take_profit_2, 115.0)
+    bars = [bar(15), bar(30, %{high: 111.0, close: 110.0}), bar(45, %{high: 116.0, low: 94.0})]
+    outcome = SignalSimulator.evaluate(s, bars, ~U[2026-10-23 09:00:00Z])
+    assert outcome.status == "tp_first" and outcome.tp1_hit
+    assert outcome.tp2_status == "ambiguous"
+
+    outcome =
+      SignalSimulator.evaluate(
+        s,
+        List.update_at(bars, 2, &%{&1 | low: 99.0}),
+        ~U[2026-10-23 09:00:00Z]
+      )
+
+    assert outcome.tp2_status == "hit"
+  end
+
+  test "pre-entry invalidation and same-bar entry/invalidation are not reported as wins" do
+    s = Map.put(signal(), :invalidation, 98.0)
+    broken = bar(15, %{open: 98.4, high: 98.5, low: 97.0, close: 97.5})
+
+    assert SignalSimulator.evaluate(s, [broken], ~U[2026-10-23 08:30:00Z]).status ==
+             "invalidated_before_entry"
+
+    uncertain = %{broken | high: 100.0}
+
+    assert SignalSimulator.evaluate(s, [uncertain], ~U[2026-10-23 08:30:00Z]).status ==
+             "ambiguous"
+  end
+
   test "ignores the publication candle and forming candles" do
     result =
       SignalSimulator.evaluate(

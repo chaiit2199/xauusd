@@ -75,21 +75,74 @@ defmodule GoldBackend.Services.SignalSimulator do
         end
       end)
 
-    cond do
-      terminal?(result.status) or result.status == "data_gap" ->
-        result
+    result =
+      cond do
+        terminal?(result.status) or result.status == "data_gap" ->
+          result
 
-      result.entry_touched and DateTime.compare(now, signal.horizon_at) != :lt ->
-        %{result | status: "expired_after_entry"}
+        result.entry_touched and DateTime.compare(now, signal.horizon_at) != :lt ->
+          %{result | status: "expired_after_entry"}
 
-      not result.entry_touched and DateTime.compare(now, deadline) != :lt and
-          (DateTime.compare(until, deadline) != :lt or DateTime.compare(start, deadline) != :lt) ->
-        %{result | status: no_entry_status(signal)}
+        not result.entry_touched and DateTime.compare(now, deadline) != :lt and
+            (DateTime.compare(until, deadline) != :lt or DateTime.compare(start, deadline) != :lt) ->
+          %{result | status: no_entry_status(signal)}
 
-      true ->
-        result
-    end
+        true ->
+          result
+      end
+
+    observe_tp2(result, signal, grouped, slots, now)
   end
+
+  # Track TP2 independently after TP1 without assuming the intrabar order.
+  defp observe_tp2(
+         %{status: "tp_first"} = result,
+         %{take_profit_2: tp2} = signal,
+         grouped,
+         slots,
+         now
+       )
+       when is_number(tp2) do
+    {:ok, tp1_at, _} = DateTime.from_iso8601(result.exit_bar_at)
+    later = Enum.filter(slots, &(DateTime.compare(&1, tp1_at) != :lt))
+
+    status =
+      Enum.reduce_while(later, "pending", fn at, _ ->
+        case Map.get(grouped, at) do
+          [bar] ->
+            if valid?(bar) do
+              hit = if signal.side == "buy", do: bar.high >= tp2, else: bar.low <= tp2
+
+              stop =
+                if signal.side == "buy",
+                  do: bar.low <= signal.stop_loss,
+                  else: bar.high >= signal.stop_loss
+
+              cond do
+                hit and stop -> {:halt, "ambiguous"}
+                hit -> {:halt, "hit"}
+                stop -> {:halt, "sl_after_tp1"}
+                true -> {:cont, "pending"}
+              end
+            else
+              {:halt, "data_gap"}
+            end
+
+          _ ->
+            {:halt, "data_gap"}
+        end
+      end)
+
+    status =
+      if status == "pending" and DateTime.compare(now, signal.horizon_at) != :lt,
+        do: "expired",
+        else: status
+
+    Map.merge(result, %{tp1_hit: true, tp2_status: status})
+  end
+
+  defp observe_tp2(result, _signal, _grouped, _slots, _now),
+    do: Map.put(result, :tp1_hit, result.status == "tp_first")
 
   defp step(state, s, b) do
     tp = if s.side == "buy", do: b.high >= s.take_profit, else: b.low <= s.take_profit
@@ -97,12 +150,28 @@ defmodule GoldBackend.Services.SignalSimulator do
     touch = b.low <= s.entry_high and b.high >= s.entry_low
     open_inside = b.open >= s.entry_low and b.open <= s.entry_high
     beyond_stop = if s.side == "buy", do: b.open <= s.stop_loss, else: b.open >= s.stop_loss
+    invalidation = Map.get(s, :invalidation)
+
+    broken =
+      is_number(invalidation) and
+        if(s.side == "buy", do: b.close <= invalidation, else: b.close >= invalidation)
 
     cond do
       state.entry_touched ->
         outcome(state, tp, sl, b)
 
       beyond_stop ->
+        %{state | status: "invalidated_before_entry", exit_bar_at: iso(b.open_time)}
+
+      touch and broken ->
+        %{
+          state
+          | status: "ambiguous",
+            exit_bar_at: iso(b.open_time),
+            detail: "Entry và đóng nến phá điểm vô hiệu cùng nến; không xác định được thứ tự."
+        }
+
+      broken ->
         %{state | status: "invalidated_before_entry", exit_bar_at: iso(b.open_time)}
 
       touch ->

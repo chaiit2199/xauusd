@@ -17,6 +17,8 @@ defmodule GoldBackend.Services.OhlcSync do
           now
         )
 
+      requests = requests ++ m5_requests(store, slot, now, opts)
+
       Enum.reduce_while(requests, %{status: "ok", error: nil}, fn {seconds, at}, _acc ->
         with {:ok, id} <- store.reserve(at, seconds, now) do
           case provider.fetch(at, seconds, opts) do
@@ -40,6 +42,26 @@ defmodule GoldBackend.Services.OhlcSync do
       end)
     else
       %{status: "missing_key", error: message(:missing_key)}
+    end
+  end
+
+  # M5 is opt-in because the shared eight-requests/hour provider quota cannot
+  # sustain a complete 5-minute feed together with M15 and H1.
+  defp m5_requests(store, slot, now, opts) do
+    if Keyword.get(opts, :m5_enabled, Application.get_env(:gold_backend, :m5_enabled, false)) do
+      at = slot |> CandleClock.closed_at(300) |> DateTime.add(-300)
+      present = Enum.any?(store.load(300, slot), &(DateTime.compare(&1.open_time, at) == :eq))
+
+      recent =
+        Enum.any?(store.recent_attempts(now), fn a ->
+          a.timeframe == 300 and a.open_time == at and DateTime.diff(now, a.requested_at) < 120
+        end)
+
+      if present or recent or GoldBackend.Services.MarketSchedule.closed_interval?(at, 300),
+        do: [],
+        else: [{300, at}]
+    else
+      []
     end
   end
 

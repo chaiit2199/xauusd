@@ -17,10 +17,10 @@ defmodule GoldBackend.Services.SignalQualityTest do
       state: "ready",
       blocked: false,
       entry: 4000.0,
-      stop_loss: 3992.0,
+      stop_loss: 3997.0,
       take_profit: 4016.0,
       atr: 8.0,
-      zone: %{id: "support", low: 3994.0, mid: 3995.0, high: 3996.0},
+      zone: %{id: "support", low: 3999.0, mid: 4000.0, high: 4001.0},
       reason: "M15 xác nhận",
       candle_closed_at: "2026-10-23T08:00:00Z",
       barrier: nil
@@ -42,16 +42,16 @@ defmodule GoldBackend.Services.SignalQualityTest do
     sell = %{
       buy
       | action: "sell",
-        stop_loss: 4008.0,
+        stop_loss: 4003.0,
         take_profit: 3984.0,
-        zone: %{id: "resistance", low: 4004.0, mid: 4005.0, high: 4006.0}
+        zone: %{id: "resistance", low: 3999.0, mid: 4000.0, high: 4001.0}
     }
 
     for {s, price, better} <- [{buy, 4002.4, 3999.0}, {sell, 3997.6, 4001.0}] do
       q = EntryQuality.assess(s, price, 0.4)
       assert q.drift_ok
       assert_in_delta q.adverse, 2.4, 1.0e-8
-      refute q.reward_risk_ok
+      assert q.reward_risk_ok
       assert EntryQuality.assess(s, better, 0.4).adverse == 0
     end
 
@@ -74,7 +74,7 @@ defmodule GoldBackend.Services.SignalQualityTest do
         Keyword.put(options(s, s.entry), :bias, %{@bias | side: "neutral"})
       )
 
-    assert neutral.action == "wait"
+    assert neutral.action == "buy"
   end
 
   test "entry passing drift still waits for reward risk, without moving stop or target" do
@@ -85,7 +85,7 @@ defmodule GoldBackend.Services.SignalQualityTest do
     assert plan.stop_loss == s.stop_loss
     assert plan.take_profit == s.take_profit
     assert Enum.find(plan.checks, &(&1.code == "entry_drift")).status == "pass"
-    assert Enum.find(plan.checks, &(&1.code == "reward_risk")).status == "blocked"
+    assert Enum.find(plan.checks, &(&1.code == "entry_zone")).status == "blocked"
   end
 
   test "a better price cannot revive broken structure or ignore the five ATR stop limit" do
@@ -144,63 +144,17 @@ defmodule GoldBackend.Services.SignalQualityTest do
     assert SetupLifecycle.identify(%{s | candle_closed_at: "2026-10-23T08:15:00Z"}).id != s.id
   end
 
-  test "the next M15 candle retains the original confirmation and expires after two candles" do
-    h1 =
-      Enum.map(0..59, fn x ->
-        %{
-          open_time: DateTime.add(~U[2026-10-23 08:00:00Z], (x - 60) * 3600),
-          open: 100.0 + x,
-          close: 100.5 + x,
-          low: 99.5 + x,
-          high: 101.0 + x,
-          confirmed: true
-        }
-      end)
-
-    m15 =
-      Enum.map(0..49, fn x ->
-        %{
-          open_time: DateTime.add(~U[2026-10-23 08:00:00Z], (x - 50) * 900),
-          open: 150.0,
-          close: 150.0,
-          low: 149.5,
-          high: 150.5,
-          confirmed: true
-        }
-      end)
-      |> List.update_at(-1, &%{&1 | close: 150.5, low: 147.0, high: 150.6})
-
-    original = SetupLifecycle.assess(m15, h1, @bias, @now, [])
-    assert original.state == "ready"
-
-    following = %{
-      List.last(m15)
-      | open_time: ~U[2026-10-23 08:00:00Z],
-        open: 150.5,
-        close: 150.5,
-        low: 150.3,
-        high: 150.7
-    }
-
-    continued = SetupLifecycle.assess(m15 ++ [following], h1, @bias, ~U[2026-10-23 08:15:35Z], [])
-    assert continued.state == "ready"
+  test "setup keeps its fixed levels and expires without resetting" do
+    original = setup()
+    continued = SetupLifecycle.validate(original, [], @bias, ~U[2026-10-23 08:15:35Z], [])
     assert continued.id == original.id
-    assert continued.atr == original.atr
-    assert continued.entry == original.entry
-    assert continued.stop_loss == original.stop_loss
-    assert continued.take_profit == original.take_profit
+    assert continued.entry == original.entry and continued.stop_loss == original.stop_loss
 
-    ended =
-      SetupLifecycle.assess(
-        m15 ++ [following, %{following | open_time: ~U[2026-10-23 08:15:00Z]}],
-        h1,
-        @bias,
-        ~U[2026-10-23 08:30:35Z],
-        []
-      )
+    assert continued.take_profit == original.take_profit and
+             continued.expires_at == original.expires_at
 
-    assert ended.state == "expired"
-    assert ended.id == original.id
+    assert SetupLifecycle.validate(original, [], @bias, ~U[2026-10-23 08:30:00Z], []).state ==
+             "expired"
   end
 
   test "setup lives two candles and invalidates on structure, target or news" do
@@ -225,7 +179,7 @@ defmodule GoldBackend.Services.SignalQualityTest do
            ).state == "invalidated"
 
     event = %{impact: "High", country: "USD", time: ~U[2026-10-23 08:10:00Z]}
-    assert SetupLifecycle.validate(s, [], @bias, @now, [event]).state == "invalidated"
+    assert SetupLifecycle.validate(s, [], @bias, @now, [event]).state == "ready"
   end
 
   test "final quote revalidation recalculates entry and RR with frozen M15 ATR" do

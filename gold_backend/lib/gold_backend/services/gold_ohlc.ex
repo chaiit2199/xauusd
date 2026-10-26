@@ -11,7 +11,7 @@ defmodule GoldBackend.Services.GoldOhlc do
     end
   end
 
-  def fetch(open_time, seconds, opts \\ []) when seconds in [900, 3600] do
+  def fetch(open_time, seconds, opts \\ []) when seconds in [300, 900, 3600] do
     key = Keyword.get(opts, :api_key, Application.get_env(:gold_backend, :gold_api_key))
     now = Keyword.get(opts, :now, DateTime.utc_now())
     start = DateTime.to_unix(open_time)

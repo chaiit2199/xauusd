@@ -15,6 +15,7 @@ export function TradeTicket({ plan }: TradeTicketProps) {
       flag !== "Có headline tác động mạnh; kiểm tra nguồn và điều kiện khớp lệnh.",
   );
   const states: Record<string, string> = {
+    WATCHING: "Theo dõi vùng giá", PLAN_READY: "Kế hoạch sẵn sàng", WAIT_RETEST: "Chờ retest", WAIT_LIVE_QUOTE: "Chờ báo giá mới", NEWS_BLOCKED: "Tạm dừng quanh tin", READY_TO_ENTER: "Có thể cân nhắc entry", INVALIDATED: "Setup đã vô hiệu", EXPIRED: "Setup đã hết hạn", PLAN_VALID_BUT_PRICE_MOVED: "Giá đã di chuyển",
     watching: "Theo dõi vùng giá", wait_confirmation: "Có setup · Chờ xác nhận M15",
     wait_pullback: "Chờ hồi về vùng vào", signal_ready: "Đủ điều kiện phát tín hiệu",
     expired: "Setup đã hết hạn", invalidated: "Setup đã vô hiệu",
@@ -31,7 +32,7 @@ export function TradeTicket({ plan }: TradeTicketProps) {
       </div>
       {plan.setup_status ? <div className="signal-status" aria-live="polite">
         <div><span className="eyebrow">Hướng ưu tiên H1</span><strong>{plan.lean_label}</strong></div>
-        <div><span className="eyebrow">Trạng thái setup</span><strong>{states[plan.setup_status]}</strong></div>
+        <div><span className="eyebrow">Trạng thái setup</span><strong>{states[plan.trade_plan_status ?? plan.setup_status] ?? plan.setup_status}</strong></div>
         <div><span className="eyebrow">Thực thi</span><strong>Chỉ phát tín hiệu</strong><span>Không ghi nhận lệnh khớp hoặc vị thế.</span></div>
       </div> : null}
       {plan.current_entry_status === "unchecked" && plan.planning_action && plan.planning_action !== "wait" ? <p className="banner warn" role="status">Chưa kiểm tra entry hiện tại. Kế hoạch dựa trên nến M15 đóng lúc {when(plan.setup_formed_at ?? null)}; cần báo giá mới và kiểm tra lại hiệu lực trước khi sử dụng.</p> : null}
@@ -60,8 +61,8 @@ export function TradeTicket({ plan }: TradeTicketProps) {
         </dl>
       </details> : null}
       {visibleFlags?.map((flag) => <p className="banner warn" key={flag}>{flag}</p>)}
-      {plan.mode === "signals_only" ? <p className="basis">Cấu hình thử nghiệm · Lệch entry &gt; 0,30 ATR: cảnh báo · SL ≤ 5 ATR · R:R ước tính ≥ 1,5. Mỗi setup chỉ phát tín hiệu một lần.</p> : null}
-      {plan.checks ? <RuleChecklist checks={plan.checks}/> : null}
+      {plan.mode === "signals_only" ? <p className="basis">Cấu hình thử nghiệm · Lệch entry &gt; 0,30 ATR: cảnh báo · SL cấu trúc ≤ 5 USD · R:R scalp tham chiếu ≥ 1,2. Mỗi setup chỉ phát tín hiệu một lần.</p> : null}
+      {plan.checks ? <details className="analysis-details"><summary>Chi tiết điều kiện</summary><RuleChecklist checks={plan.checks}/></details> : null}
       {!plan.checks && plan.entry_guard?.blocked ? (
         <details className="analysis-details">
           <summary>Điều kiện chưa đạt · {plan.entry_guard.reasons.length}</summary>

@@ -24,6 +24,7 @@ export type RuleCheck = {
 };
 
 export type CfdPlan = {
+  trade_plan_status?: string;
   instrument: string;
   timeframe?: "H1" | "M15";
   trend_timeframe?: "H1";
@@ -228,6 +229,8 @@ export type DecisionPlan = {
   stop_loss: number | null;
   stop_reason: string;
   take_profit: number | null;
+  take_profit_2?: number | null;
+  invalidation?: number | null;
   target_reason: string;
   reward_risk: number | null;
   reward_risk_basis: string;

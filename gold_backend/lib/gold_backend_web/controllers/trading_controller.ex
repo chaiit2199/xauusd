@@ -207,6 +207,14 @@ defmodule GoldBackendWeb.TradingController do
     now = Keyword.get(opts, :as_of, DateTime.utc_now())
     m15 = Keyword.get_lazy(opts, :m15_candles, fn -> CandleStore.load(900, now) end)
     h1 = Keyword.get_lazy(opts, :h1_candles, fn -> CandleStore.load(3600, now) end)
+
+    m5 =
+      Keyword.get_lazy(opts, :m5_candles, fn ->
+        if Application.get_env(:gold_backend, :m5_enabled, false),
+          do: CandleStore.load(300, now),
+          else: []
+      end)
+
     ohlc = OhlcContext.build(m15, h1, now)
     feed = Keyword.get(opts, :ohlc_feed, %{status: "stored", error: nil})
 
@@ -215,6 +223,7 @@ defmodule GoldBackendWeb.TradingController do
         source: "gold_api_ohlc",
         configured: GoldOhlc.configured?(),
         m15_count: length(m15),
+        m5_count: length(m5),
         h1_count: length(h1),
         required: 30,
         required_h1: 50,
@@ -263,13 +272,12 @@ defmodule GoldBackendWeb.TradingController do
           do: ohlc.summary,
           else: Indicators.summarize(if(live_h1 == [], do: closed_h1, else: live_h1))
 
-      h1_ready = not is_nil(ohlc) and ohlc.h1_ready
       entry = latest.price |> Decimal.round(2) |> Decimal.to_float()
       live_ticks = Enum.count(prices, &(&1.origin in ["gold_api_ohlc" | @live_origins]))
 
       {warmup, warmup_detail} =
         cond do
-          not h1_ready ->
+          length(m15) < 30 ->
             {true,
              feed.error ||
                "Đang tích lũy OHLC Gold API: M15 #{length(m15)}/30, H1 #{length(h1)}/50; cần H1 mới nhất đã đóng."}
@@ -287,12 +295,19 @@ defmodule GoldBackendWeb.TradingController do
           else: EconomicCalendar.snapshot(now)
 
       events = calendar.events
-      m15_setup = SetupLifecycle.assess(m15, closed_h1_bars, bias, now, events)
+      m15_setup = SetupLifecycle.assess_with_m5(m15, m5, closed_h1_bars, bias, now, events)
 
       m15_setup =
         if Keyword.get(opts, :stored_only, false),
           do: m15_setup,
-          else: GoldBackend.Services.SetupRegistry.resolve(m15_setup, m15, bias, now, events)
+          else:
+            GoldBackend.Services.SetupRegistry.resolve(
+              m15_setup,
+              if(Map.get(m15_setup, :timeframe_seconds) == 300, do: m5, else: m15),
+              bias,
+              now,
+              events
+            )
 
       blocking = EconomicCalendar.blocking(events, now)
       news_bias = NewsBias.assess(news, now)
@@ -301,6 +316,7 @@ defmodule GoldBackendWeb.TradingController do
       plan =
         TradePlan.build(summary.indicators, entry,
           bias: bias,
+          indicator_timeframe: if(ohlc, do: ohlc.summary_timeframe, else: "unknown"),
           as_of: now,
           quote: Keyword.get(opts, :quote),
           calendar_status: calendar.status,
@@ -320,6 +336,7 @@ defmodule GoldBackendWeb.TradingController do
          ohlc_feed: feed,
          m15_setup: m15_setup,
          m15_candles: m15,
+         m5_candles: m5,
          prices: prices,
          news: news,
          news_bias: news_bias,

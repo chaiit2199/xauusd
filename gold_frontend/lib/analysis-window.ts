@@ -28,6 +28,7 @@ export function expireAnalysis(board: MarketBoard, now: number): MarketBoard {
       action_label: "Đứng ngoài",
       setup_status: terminal ? plan.setup_status : expiredSetup ? "expired" : onlyQuote && plan.planning_action && plan.planning_action !== "wait" && plan.setup_status !== "paused" && plan.setup_status !== "news_window" ? "awaiting_quote" : "paused",
       current_entry_status: status,
+      trade_plan_status: terminal ? (plan.setup_status === "invalidated" ? "INVALIDATED" : "EXPIRED") : expiredSetup ? "EXPIRED" : onlyQuote ? "WAIT_LIVE_QUOTE" : "PLAN_READY",
       entry_admission: null,
       entry_guard: { blocked: true, reasons: [reason] },
       blocking_reasons: [reason],
@@ -46,7 +47,7 @@ export function expireAnalysis(board: MarketBoard, now: number): MarketBoard {
       checks: board.cfd_plan.checks?.map((check) => {
         if (check.code === "quote" && staleQuote) return { ...check, status: "warning", required: false, scope: "advisory", reason: "Báo giá đã quá hạn; kế hoạch vẫn dùng entry tham chiếu. Chưa kiểm tra entry hiện tại." };
         if ((check.code === "setup_lifetime" && expiredSetup) || (check.code === "calendar_data" && expiredCalendar) || (check.code === "m15_data" && expiredAnalysis)) return { ...check, status: "blocked", required: true, reason };
-        const currentDependent = ["current_entry", "market_open", "entry_drift", "levels", "reward_risk", "barrier_room", "structure", "setup_target"].includes(check.code);
+        const currentDependent = ["current_entry", "entry_zone", "entry_drift", "levels", "reward_risk", "barrier_room", "structure", "setup_target"].includes(check.code);
         if (currentDependent || (!onlyQuote && ["direction", "trigger"].includes(check.code)) || (expiredCalendar && check.code === "calendar_window")) {
           if (check.code === "market_open" && check.status === "blocked") return check;
           return { ...check, status: "unknown", scope: "current_entry", reason: "Chờ đánh giá lại với dữ liệu mới." };

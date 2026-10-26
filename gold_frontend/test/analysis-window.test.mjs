@@ -66,7 +66,7 @@ test("quote expiry preserves the reference plan but clears live RR and price che
   assert.equal(result.decision_plan.reward_risk, null);
   assert.equal(result.decision_plan.current_entry, null);
   const checks = Object.fromEntries(result.checks.map(c => [c.code, c.status]));
-  assert.deepEqual(checks, { quote: "warning", trigger: "pass", entry_drift: "unknown", market_open: "unknown" });
+  assert.deepEqual(checks, { quote: "warning", trigger: "pass", entry_drift: "unknown", market_open: "pass" });
   const nextCandle = expireAnalysis(current, Date.parse(current.ai_next_analysis_at)).cfd_plan;
   assert.equal(nextCandle.setup_status, "paused");
   assert.equal(nextCandle.checks.find(c => c.code === "trigger").status, "unknown");

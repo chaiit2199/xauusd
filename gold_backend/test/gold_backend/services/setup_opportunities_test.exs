@@ -46,7 +46,8 @@ defmodule GoldBackend.Services.SetupOpportunitiesTest do
     end
 
     only_poor = SetupEngine.assess(trigger(), @bias, [poor, @resistance], @now)
-    assert plan(only_poor).action == "wait"
+    assert only_poor.zone.id == poor.id
+    assert plan(only_poor).action == "buy"
   end
 
   test "selection is symmetric for SELL and ignores a candidate with SL beyond five ATR" do
@@ -72,7 +73,7 @@ defmodule GoldBackend.Services.SetupOpportunitiesTest do
     sell = SetupEngine.assess(mirrored, %{@bias | side: "sell"}, [poor, @zone, support], @now)
     assert sell.action == "sell"
     assert sell.zone.id == @zone.id
-    assert sell.take_profit == 92.0
+    assert_in_delta sell.take_profit, sell.entry - 5.0, 0.01
 
     assert StrategyPlan.build(
              %{current_price: 99.0, sma_20: 100.0, macd: -1.0, rsi_14: 20.0},
@@ -125,7 +126,7 @@ defmodule GoldBackend.Services.SetupOpportunitiesTest do
     upper = %{id: "aoi_high_h1", low: 102.0, mid: 102.5, high: 103.0, entry_only: true}
     setup = SetupEngine.assess(trigger(), @bias, [aoi, upper, @resistance], @now)
     assert setup.zone.id == aoi.id
-    assert setup.take_profit == @resistance.low
+    assert_in_delta setup.take_profit, setup.entry + 5.0, 0.01
     assert plan(setup).action == "buy"
   end
 

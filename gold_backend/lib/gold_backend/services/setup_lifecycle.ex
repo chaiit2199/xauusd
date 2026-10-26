@@ -14,8 +14,7 @@ defmodule GoldBackend.Services.SetupLifecycle do
     slot = CandleClock.closed_at(now)
     current = candidate(m15, h1, bias, slot)
 
-    if current.state == "data_unavailable" or
-         not StrategyPolicy.h1_ready?(bias) do
+    if current.state == "data_unavailable" do
       current
     else
       candidates = [
@@ -27,9 +26,68 @@ defmodule GoldBackend.Services.SetupLifecycle do
       ]
 
       case Enum.find(candidates, &(&1.state == "ready")) do
-        nil -> current
-        setup -> validate(setup, m15, bias, now, events)
+        nil ->
+          current
+
+        setup ->
+          checked = validate(setup, m15, bias, now, events)
+
+          logs =
+            (Map.get(current, :candidate_log, []) ++ Map.get(setup, :candidate_log, []))
+            |> Enum.uniq_by(& &1.id)
+
+          Map.put(checked, :candidate_log, logs)
       end
+    end
+  end
+
+  # Only genuine, closed M5 bars may confirm a previously touched M15 zone.
+  def assess_with_m5(m15, m5, h1, bias, now, events) do
+    m15_setup = assess(m15, h1, bias, now, events)
+
+    if m15_setup.state == "data_unavailable" or m5 == [] do
+      m15_setup
+    else
+      slot = CandleClock.closed_at(now, 300)
+
+      m5_candidates =
+        Enum.map([0, 300, 600, 900], fn offset ->
+          at = DateTime.add(slot, -offset)
+          trigger_open = DateTime.add(at, -300)
+
+          recent_m15 =
+            m15
+            |> Enum.filter(
+              &(DateTime.compare(DateTime.add(&1.open_time, 900), trigger_open) != :gt)
+            )
+            |> Enum.take(-3)
+
+          zones =
+            m15_setup.zones
+            |> Enum.reject(&(Map.get(&1, :target_only, false) or Map.has_key?(&1, :side)))
+            |> Enum.filter(fn z ->
+              Enum.any?(recent_m15, fn b ->
+                known = Map.get(z, :known_at)
+                (is_nil(known) or known <= DateTime.to_iso8601(b.open_time)) and Zoi.touch?(b, z)
+              end)
+            end)
+
+          historical_bias = BiasEngine.assess(h1, trigger_open)
+          setup = SetupEngine.assess(m5, historical_bias, zones, at, nil, 300)
+
+          if setup.state == "ready", do: validate(setup, m5, bias, now, events), else: setup
+        end)
+
+      options = Enum.filter([m15_setup | m5_candidates], &(&1.state == "ready"))
+
+      selected = if options == [], do: m15_setup, else: SetupEngine.select(options, bias)
+
+      logs =
+        [m15_setup | m5_candidates]
+        |> Enum.flat_map(&Map.get(&1, :candidate_log, []))
+        |> Enum.uniq_by(& &1.id)
+
+      %{selected | candidate_log: logs, candidate_count: length(logs)}
     end
   end
 
@@ -64,26 +122,35 @@ defmodule GoldBackend.Services.SetupLifecycle do
 
   def identify(setup) do
     {:ok, formed, _} = DateTime.from_iso8601(setup.candle_closed_at)
-    identity = {StrategyPolicy.version(), setup.action, setup.zone.id, setup.candle_closed_at}
+    seconds = Map.get(setup, :timeframe_seconds, 900)
+
+    identity =
+      {StrategyPolicy.version(), seconds, setup.action, setup.zone.id, setup.candle_closed_at}
+
     id = :crypto.hash(:sha256, :erlang.term_to_binary(identity)) |> Base.encode16(case: :lower)
 
     Map.merge(setup, %{
       id: id,
       formed_at: setup.candle_closed_at,
-      expires_at: DateTime.to_iso8601(DateTime.add(formed, StrategyPolicy.setup_seconds())),
+      expires_at:
+        DateTime.to_iso8601(
+          DateTime.add(formed, if(seconds == 300, do: 1200, else: StrategyPolicy.setup_seconds()))
+        ),
       price_source: "gold_api",
       price_basis: "reference"
     })
   end
 
-  def validate(setup, bars, bias, now, events) do
+  def validate(setup, bars, _bias, now, _events) do
     {:ok, formed, _} = DateTime.from_iso8601(setup.formed_at)
     {:ok, expiry, _} = DateTime.from_iso8601(setup.expires_at)
+
+    seconds = Map.get(setup, :timeframe_seconds, 900)
 
     after_signal =
       Enum.filter(bars, fn b ->
         DateTime.compare(b.open_time, formed) != :lt and
-          DateTime.compare(DateTime.add(b.open_time, 900), now) != :gt
+          DateTime.compare(DateTime.add(b.open_time, seconds), now) != :gt
       end)
 
     broken =
@@ -106,19 +173,9 @@ defmodule GoldBackend.Services.SetupLifecycle do
           )
       end)
 
-    news_changed =
-      Enum.any?(events, fn e ->
-        e.impact == "High" and Map.get(e, :country, "USD") in ["USD", "All"] and
-          DateTime.compare(DateTime.add(e.time, -900), now) != :gt and
-          DateTime.compare(DateTime.add(e.time, 1800), formed) != :lt
-      end)
-
     cond do
       DateTime.compare(now, expiry) != :lt ->
-        halt(setup, "expired", "Setup đã hết hạn sau hai nến M15; chờ xác nhận mới.")
-
-      not StrategyPolicy.h1_ready?(bias) ->
-        halt(setup, "data_unavailable", "Chưa xác minh được dữ liệu H1; tạm dừng đánh giá setup.")
+        halt(setup, "expired", "Setup đã hết hạn; chờ xác nhận mới.")
 
       # H1/indicator bias is advisory for AI; do not cancel structure setups on bias flip.
 
@@ -127,13 +184,6 @@ defmodule GoldBackend.Services.SetupLifecycle do
 
       target_reached ->
         halt(setup, "invalidated", "Giá đã chạm mục tiêu của setup; không phát lại tín hiệu cũ.")
-
-      news_changed ->
-        halt(
-          setup,
-          "invalidated",
-          "Setup đi qua cửa sổ tin quan trọng; cần xác nhận M15 mới sau tin."
-        )
 
       true ->
         setup

@@ -11,7 +11,7 @@ defmodule GoldBackend.Services.EntryQuality do
 
     levels =
       price > 0 and setup.stop_loss > 0 and setup.take_profit > 0 and risk > 0 and
-        risk <= StrategyPolicy.max_stop_atr() * setup.atr and
+        risk <= 5.0 and
         if(buy?,
           do: setup.stop_loss < price and price < setup.take_profit,
           else: setup.take_profit < price and price < setup.stop_loss

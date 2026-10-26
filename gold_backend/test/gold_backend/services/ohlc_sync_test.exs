@@ -40,6 +40,7 @@ defmodule GoldBackend.Services.OhlcSyncTest do
     assert m15.confirmed and h1.confirmed
     assert_receive {:reserve, 900, _}
     assert_receive {:reserve, 3600, _}
+    refute_received {:reserve, 300, _}
   end
 
   test "missing key performs no network or storage work" do

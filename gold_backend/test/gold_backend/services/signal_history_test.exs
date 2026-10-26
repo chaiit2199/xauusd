@@ -34,6 +34,109 @@ defmodule GoldBackend.Services.SignalHistoryTest do
     }
   end
 
+  test "M5 disabled: H1 and M15 setup can be journaled as a signal" do
+    now = ~U[2026-10-23 08:00:00Z]
+
+    h1 =
+      for n <- 0..59 do
+        %{
+          open_time: DateTime.add(now, (n - 60) * 3600),
+          open: 100.0,
+          high: if(n == 35, do: 110.0, else: 100.5),
+          low: 99.5,
+          close: 100.0,
+          confirmed: true
+        }
+      end
+
+    m15 =
+      for n <- 0..49 do
+        %{
+          open_time: DateTime.add(now, (n - 50) * 900),
+          open: 100.0,
+          high: if(n == 49, do: 100.6, else: 100.5),
+          low: if(n == 49, do: 98.5, else: 99.5),
+          close: if(n == 49, do: 100.5, else: 100.0),
+          confirmed: true
+        }
+      end
+
+    bias = GoldBackend.Services.BiasEngine.assess(h1, now)
+    setup = GoldBackend.Services.SetupLifecycle.assess_with_m5(m15, [], h1, bias, now, [])
+    indicators = GoldBackend.Services.Indicators.summarize_candles(h1, 3600).indicators
+
+    plan =
+      GoldBackend.Services.StrategyPlan.build(indicators, setup.entry,
+        bias: bias,
+        m15_setup: setup,
+        as_of: now,
+        quote: %{price: setup.entry, timestamp: now},
+        calendar_status: "ok"
+      )
+
+    assert plan.trade_plan_status == "READY_TO_ENTER"
+    assert {:ok, {_, true}} = DecisionJournal.record(%{analysis_at: now, plan: plan})
+    assert [%{side: "buy", setup_id: id}] = SignalHistory.list(now).items
+    assert id == setup.id
+    assert SignalHistory.candidate_summary().ready_to_enter == 1
+  end
+
+  test "candidate journal deduplicates and counts readiness by direction and setup" do
+    now = DateTime.utc_now()
+
+    candidate = %{
+      id: "history-setup",
+      action: "buy",
+      setup_kind: "trend_pullback",
+      blocked: false
+    }
+
+    p = plan(now) |> Map.put(:candidate_log, [candidate]) |> Map.put(:planning_action, "buy")
+    assert {:ok, {_, true}} = DecisionJournal.record(%{analysis_at: now, plan: p})
+    assert {:ok, {_, false}} = DecisionJournal.record(%{analysis_at: now, plan: p})
+    summary = SignalHistory.candidate_summary()
+    assert summary.count == 1 and summary.plan_ready == 1 and summary.ready_to_enter == 1
+    assert [%{side: "buy", setup_type: "trend_pullback", candidates: 1}] = summary.groups
+  end
+
+  test "accepted candidates receive an independent M15 touch outcome" do
+    now = DateTime.utc_now() |> CandleClock.closed_at()
+
+    candidate = %{
+      id: "history-setup",
+      action: "buy",
+      setup_kind: "trend_pullback",
+      blocked: false,
+      formed_at: DateTime.to_iso8601(now),
+      expires_at: DateTime.to_iso8601(DateTime.add(now, 1800)),
+      entry_zone: %{low: 99.0, high: 101.0},
+      stop_loss: 95.0,
+      take_profit: 110.0,
+      take_profit_2: 115.0
+    }
+
+    p = plan(now) |> Map.put(:candidate_log, [candidate]) |> Map.put(:planning_action, "buy")
+    assert {:ok, {_, true}} = DecisionJournal.record(%{analysis_at: now, plan: p})
+
+    for {at, high, close} <- [{now, 102.0, 100.0}, {DateTime.add(now, 900), 116.0, 110.0}] do
+      CandleStore.put(
+        %{
+          source: "gold_api_ohlc",
+          open_time: at,
+          open: 100.0,
+          high: high,
+          low: 99.0,
+          close: close
+        },
+        900
+      )
+    end
+
+    assert :ok = SignalHistory.refresh_candidates(DateTime.add(now, 1800))
+    summary = SignalHistory.candidate_summary()
+    assert [%{tp1_hit: 1, tp2_hit: 1, outcomes: %{"tp_first" => 1}}] = summary.groups
+  end
+
   test "published plan survives repeated evaluations and outcomes are durable and idempotent" do
     now = DateTime.utc_now()
     p = plan(now)
@@ -143,7 +246,7 @@ defmodule GoldBackend.Services.SignalHistoryTest do
         stop_loss: 95.0,
         take_profit: 110.0,
         atr: 2.0,
-        zone: %{id: "support", low: 96.0, mid: 97.0, high: 98.0},
+        zone: %{id: "support", low: 99.0, mid: 100.0, high: 101.0},
         barrier: nil,
         candle_closed_at: DateTime.to_iso8601(CandleClock.closed_at(now)),
         reason: "M15"
