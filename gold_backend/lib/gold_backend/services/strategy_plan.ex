@@ -121,7 +121,7 @@ defmodule GoldBackend.Services.StrategyPlan do
       check(
         "setup_lifetime",
         lifetime_ok,
-        "Setup có hiệu lực tối đa hai nến M15 từ lần xác nhận."
+        "Setup có hiệu lực tối đa ba nến M15 từ lần xác nhận."
       ),
       check(
         "setup_target",
@@ -226,7 +226,9 @@ defmodule GoldBackend.Services.StrategyPlan do
           do: eligible_zone != nil and entry >= eligible_zone.low and entry <= eligible_zone.high,
           else: nil
         ),
-        "Chờ giá quay lại vùng entry phù hợp."
+        "Giá hiện tại ngoài vùng entry tham chiếu; chỉ là cảnh báo nếu SL/TP, cấu trúc, TP tối thiểu 5 USD và R:R scalp vẫn hợp lệ.",
+        false,
+        "advisory"
       ),
       check(
         "reward_risk",

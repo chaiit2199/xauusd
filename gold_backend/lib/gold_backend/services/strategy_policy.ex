@@ -1,12 +1,13 @@
 defmodule GoldBackend.Services.StrategyPolicy do
   @moduledoc "Versioned experimental signal parameters; no broker execution or position accounting."
-  def version, do: "scalp-v8-structure"
+  def version, do: "scalp-v10-flex-entry"
   def assumed_spread, do: 0.4
   def simulation_seconds, do: 7200
   def entry_atr, do: 0.30
   def max_stop_atr, do: 5.0
   def min_reward_risk, do: 1.2
-  def setup_seconds, do: 1800
+  # M15 plans may remain actionable for three closed M15 candles.
+  def setup_seconds, do: 2700
   def quote_seconds, do: 120
 
   def h1_ready?(bias),

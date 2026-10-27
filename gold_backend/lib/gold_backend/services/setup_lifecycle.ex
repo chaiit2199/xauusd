@@ -1,5 +1,5 @@
 defmodule GoldBackend.Services.SetupLifecycle do
-  @moduledoc "Replay the last two M15 confirmations without moving their original levels or ATR."
+  @moduledoc "Replay recent M15 confirmations without moving their original levels or ATR."
   alias GoldBackend.Services.{
     BiasEngine,
     CandleClock,

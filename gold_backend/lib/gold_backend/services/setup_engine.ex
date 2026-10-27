@@ -92,7 +92,7 @@ defmodule GoldBackend.Services.SetupEngine do
         touched =
           Enum.filter(zones, fn z ->
             not Map.get(z, :target_only, false) and
-              Enum.any?(Enum.take(bars, -3), fn b ->
+              Enum.any?(Enum.take(bars, -4), fn b ->
                 known = Map.get(z, :formed_at) || Map.get(z, :known_at)
                 (is_nil(known) or known <= DateTime.to_iso8601(b.open_time)) and Zoi.touch?(b, z)
               end)
@@ -105,7 +105,7 @@ defmodule GoldBackend.Services.SetupEngine do
         candidates =
           for zone <- touched,
               side <- sides,
-              name = pattern(last, prev, zone, side),
+              name = pattern(last, prev, zone, side) || reaction_close?(last, zone, side, bars),
               name != nil,
               zone_intact?(bars, zone, side),
               not Map.has_key?(zone, :side) or (zone.side == side and name == "breakout_retest"),
@@ -199,7 +199,7 @@ defmodule GoldBackend.Services.SetupEngine do
   end
 
   defp zone_intact?(bars, zone, side) do
-    recent = Enum.take(bars, -3)
+    recent = Enum.take(bars, -4)
     known = Map.get(zone, :formed_at) || Map.get(zone, :known_at)
 
     touch_index =
@@ -221,7 +221,7 @@ defmodule GoldBackend.Services.SetupEngine do
   defp candidate(base, last, zone, name, side, bias, bars, seconds) do
     touch =
       bars
-      |> Enum.take(-3)
+      |> Enum.take(-4)
       |> Enum.reverse()
       |> Enum.find(fn b ->
         known = Map.get(zone, :formed_at) || Map.get(zone, :known_at)
@@ -304,7 +304,7 @@ defmodule GoldBackend.Services.SetupEngine do
         confirmation_at: base.candle_closed_at,
         confirmation_close: last.close,
         take_profit_2: if(target2 && target2 > 0, do: Float.round(target2 * 1.0, 2)),
-        zone_valid_until: DateTime.to_iso8601(DateTime.add(touch.open_time, 3 * seconds))
+        zone_valid_until: DateTime.to_iso8601(DateTime.add(touch.open_time, 4 * seconds))
       })
       |> GoldBackend.Services.SetupLifecycle.identify()
 
@@ -413,6 +413,29 @@ defmodule GoldBackend.Services.SetupEngine do
   defp pattern_label("pullback_pinbar"), do: "pinbar"
   defp pattern_label("pullback_engulfing"), do: "engulfing"
   defp pattern_label("sweep_reclaim"), do: "sweep–reclaim"
+  defp pattern_label("reaction_close"), do: "nến phản ứng đóng ngoài vùng"
+
+  defp reaction_close?(bar, zone, side, bars) do
+    span = bar.high - bar.low
+    body = abs(bar.close - bar.open)
+    buy? = side == "buy"
+    directional? = if(buy?, do: bar.close > bar.open, else: bar.close < bar.open)
+    close_outside? = if(buy?, do: bar.close > zone.high, else: bar.close < zone.low)
+    known = Map.get(zone, :formed_at) || Map.get(zone, :known_at)
+
+    prior_rejection? =
+      bars
+      |> Enum.take(-4)
+      |> Enum.reject(&(&1.open_time == bar.open_time))
+      |> Enum.any?(fn prior ->
+        known_before_touch? = is_nil(known) or known <= DateTime.to_iso8601(prior.open_time)
+        adverse? = if(buy?, do: prior.close <= prior.open, else: prior.close >= prior.open)
+        known_before_touch? and adverse? and Zoi.touch?(prior, zone)
+      end)
+
+    (span > 0 and directional? and body >= 0.30 * span and close_outside? and prior_rejection?) &&
+      "reaction_close"
+  end
 
   def pattern(b, p, z, side) when side in ["buy", "sell"] do
     span = b.high - b.low
@@ -440,6 +463,15 @@ defmodule GoldBackend.Services.SetupEngine do
           do: b.low < z.low and b.close > z.mid and p.close >= z.low,
           else: b.high > z.high and b.close < z.mid and p.close <= z.high
 
+    # A touch may occur on either of the two preceding closed candles. This accepts
+    # a decisive reaction only when its body closes beyond the far edge of the zone.
+    # The surrounding assess/zone_intact? checks still require a recent touch and
+    # reject a zone that has been structurally lost.
+    reaction_close =
+      span > 0 and directional and body >= 0.30 * span and
+        if(buy, do: p.close <= p.open, else: p.close >= p.open) and
+        if(buy, do: b.close > z.high, else: b.close < z.low)
+
     # Two closed candles: a body crosses the zone, then a directional retest
     # holds its far edge. The zone must already exist before the breakout bar.
     known_before_break =
@@ -461,6 +493,7 @@ defmodule GoldBackend.Services.SetupEngine do
       pin -> "pullback_pinbar"
       engulf -> "pullback_engulfing"
       reclaim -> "sweep_reclaim"
+      reaction_close -> "reaction_close"
       true -> nil
     end
   end

@@ -94,6 +94,22 @@ defmodule GoldBackend.Services.PlanningQuoteTest do
     end
   end
 
+  test "a price just outside the reference entry zone can remain eligible when structural risk is valid" do
+    {s, opts} = scenario("sell")
+
+    plan =
+      StrategyPlan.build(
+        @i,
+        s.entry,
+        Keyword.put(opts, :quote, %{price: 4002.995, timestamp: @now})
+      )
+
+    entry_zone = Enum.find(plan.checks, &(&1.code == "entry_zone"))
+    assert entry_zone.status == "warning" and not entry_zone.required
+    assert plan.action == "sell"
+    assert plan.trade_plan_status == "READY_TO_ENTER"
+  end
+
   test "missing target, missing candles, expired or invalidated setup cannot become ready" do
     {s, opts} = scenario()
 
@@ -139,7 +155,7 @@ defmodule GoldBackend.Services.PlanningQuoteTest do
     stale = InsightCache.expire_snapshot(data, ~U[2026-10-23 08:15:00Z]).cfd_plan
     assert stale.setup_status == "paused"
     assert Enum.find(stale.checks, &(&1.code == "m15_data")).status == "blocked"
-    terminal = InsightCache.expire_snapshot(data, ~U[2026-10-23 08:30:00Z]).cfd_plan
+    terminal = InsightCache.expire_snapshot(data, ~U[2026-10-23 08:45:01Z]).cfd_plan
     assert terminal.setup_status == "expired" and terminal.current_entry_status == "blocked"
   end
 end

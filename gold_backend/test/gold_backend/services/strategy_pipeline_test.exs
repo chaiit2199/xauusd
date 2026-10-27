@@ -71,6 +71,55 @@ defmodule GoldBackend.Services.StrategyPipelineTest do
     refute SetupEngine.pattern(bar, prev, @zone, "sell")
   end
 
+  test "a decisive close after a prior zone touch is a valid BUY or SELL reaction" do
+    touch = %{open: 100.5, close: 99.8, low: 99.4, high: 100.7}
+    reaction = %{open: 101.05, close: 101.6, low: 101.02, high: 101.7}
+
+    assert SetupEngine.pattern(reaction, touch, @zone, "buy") == "reaction_close"
+
+    input =
+      bars()
+      |> List.update_at(-2, &Map.merge(&1, touch))
+      |> List.update_at(-1, &Map.merge(&1, reaction))
+
+    setup = SetupEngine.assess(input, @bias, [@zone, @resistance], @now)
+    assert setup.pattern == "reaction_close"
+    assert setup.zone_touched_at == "2026-10-23T07:45:00Z"
+    assert setup.confirmation_at == "2026-10-23T08:00:00Z"
+
+    delayed =
+      bars()
+      |> List.update_at(-3, &Map.merge(&1, touch))
+      |> List.update_at(-2, &%{&1 | open: 100.8, close: 100.8, low: 100.6, high: 101.0})
+      |> List.update_at(-1, &Map.merge(&1, reaction))
+
+    assert SetupEngine.assess(delayed, @bias, [@zone, @resistance], @now).pattern ==
+             "reaction_close"
+
+    delayed_three =
+      bars()
+      |> List.update_at(-4, &Map.merge(&1, touch))
+      |> List.update_at(-3, &%{&1 | open: 100.8, close: 100.8, low: 100.6, high: 101.0})
+      |> List.update_at(-2, &%{&1 | open: 100.9, close: 100.9, low: 100.7, high: 101.0})
+      |> List.update_at(-1, &Map.merge(&1, reaction))
+
+    assert SetupEngine.assess(delayed_three, @bias, [@zone, @resistance], @now).pattern ==
+             "reaction_close"
+
+    mirror = fn bar ->
+      %{
+        bar
+        | open: 200 - bar.open,
+          close: 200 - bar.close,
+          high: 200 - bar.low,
+          low: 200 - bar.high
+      }
+    end
+
+    assert SetupEngine.pattern(mirror.(reaction), mirror.(touch), @zone, "sell") ==
+             "reaction_close"
+  end
+
   test "short, approximate, stale, duplicate and unconfirmed data fail closed" do
     for bs <- [
           [],

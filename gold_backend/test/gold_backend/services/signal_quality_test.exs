@@ -85,7 +85,7 @@ defmodule GoldBackend.Services.SignalQualityTest do
     assert plan.stop_loss == s.stop_loss
     assert plan.take_profit == s.take_profit
     assert Enum.find(plan.checks, &(&1.code == "entry_drift")).status == "pass"
-    assert Enum.find(plan.checks, &(&1.code == "entry_zone")).status == "blocked"
+    assert Enum.find(plan.checks, &(&1.code == "entry_zone")).status == "warning"
   end
 
   test "a better price cannot revive broken structure or ignore the five ATR stop limit" do
@@ -153,14 +153,14 @@ defmodule GoldBackend.Services.SignalQualityTest do
     assert continued.take_profit == original.take_profit and
              continued.expires_at == original.expires_at
 
-    assert SetupLifecycle.validate(original, [], @bias, ~U[2026-10-23 08:30:00Z], []).state ==
+    assert SetupLifecycle.validate(original, [], @bias, ~U[2026-10-23 08:45:00Z], []).state ==
              "expired"
   end
 
-  test "setup lives two candles and invalidates on structure, target or news" do
+  test "M15 setup lives three candles and invalidates on structure, target or news" do
     s = setup()
-    assert SetupLifecycle.validate(s, [], @bias, ~U[2026-10-23 08:29:59Z], []).state == "ready"
-    assert SetupLifecycle.validate(s, [], @bias, ~U[2026-10-23 08:30:00Z], []).state == "expired"
+    assert SetupLifecycle.validate(s, [], @bias, ~U[2026-10-23 08:44:59Z], []).state == "ready"
+    assert SetupLifecycle.validate(s, [], @bias, ~U[2026-10-23 08:45:00Z], []).state == "expired"
 
     # Opposite H1 bias alone does not cancel a structure setup.
     assert SetupLifecycle.validate(s, [], %{@bias | side: "sell"}, @now, []).state == "ready"
