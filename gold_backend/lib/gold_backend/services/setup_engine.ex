@@ -105,7 +105,9 @@ defmodule GoldBackend.Services.SetupEngine do
         candidates =
           for zone <- touched,
               side <- sides,
-              name = pattern(last, prev, zone, side) || reaction_close?(last, zone, side, bars),
+              name =
+                pattern(last, prev, zone, side) || reaction_close?(last, zone, side, bars) ||
+                  zone_rejection_close?(last, zone, side, bars),
               name != nil,
               zone_intact?(bars, zone, side),
               not Map.has_key?(zone, :side) or (zone.side == side and name == "breakout_retest"),
@@ -180,7 +182,7 @@ defmodule GoldBackend.Services.SetupEngine do
               base
               | state: "wait_m15",
                 reason:
-                  "Chờ pinbar, engulfing, sweep–reclaim hoặc phá vỡ–retest tại vùng gần giá."
+                  "Chờ pinbar, engulfing, sweep–reclaim, nến phản ứng đóng qua vùng hoặc phá vỡ–retest tại vùng gần giá."
             }
 
           true ->
@@ -414,6 +416,7 @@ defmodule GoldBackend.Services.SetupEngine do
   defp pattern_label("pullback_engulfing"), do: "engulfing"
   defp pattern_label("sweep_reclaim"), do: "sweep–reclaim"
   defp pattern_label("reaction_close"), do: "nến phản ứng đóng ngoài vùng"
+  defp pattern_label("zone_rejection_close"), do: "nến phản ứng đóng qua tâm vùng"
 
   defp reaction_close?(bar, zone, side, bars) do
     span = bar.high - bar.low
@@ -435,6 +438,27 @@ defmodule GoldBackend.Services.SetupEngine do
 
     (span > 0 and directional? and body >= 0.30 * span and close_outside? and prior_rejection?) &&
       "reaction_close"
+  end
+
+  defp zone_rejection_close?(bar, zone, side, bars) do
+    span = bar.high - bar.low
+    body = abs(bar.close - bar.open)
+    buy? = side == "buy"
+    directional? = if(buy?, do: bar.close > bar.open, else: bar.close < bar.open)
+    closes_through_mid? = if(buy?, do: bar.close > zone.mid, else: bar.close < zone.mid)
+    known = Map.get(zone, :formed_at) || Map.get(zone, :known_at)
+
+    prior_touch? =
+      bars
+      |> Enum.take(-4)
+      |> Enum.reject(&(&1.open_time == bar.open_time))
+      |> Enum.any?(fn prior ->
+        known_before_touch? = is_nil(known) or known <= DateTime.to_iso8601(prior.open_time)
+        known_before_touch? and Zoi.touch?(prior, zone)
+      end)
+
+    (span > 0 and directional? and body >= 0.20 * span and closes_through_mid? and prior_touch?) &&
+      "zone_rejection_close"
   end
 
   def pattern(b, p, z, side) when side in ["buy", "sell"] do

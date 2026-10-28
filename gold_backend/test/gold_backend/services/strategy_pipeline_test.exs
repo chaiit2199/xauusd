@@ -120,6 +120,39 @@ defmodule GoldBackend.Services.StrategyPipelineTest do
              "reaction_close"
   end
 
+  test "a directional close through the zone midpoint creates a rejection candidate" do
+    touch = %{open: 100.2, close: 100.2, low: 99.4, high: 100.5}
+    rejection = %{open: 100.05, close: 100.4, low: 100.0, high: 100.5}
+
+    assert SetupEngine.pattern(rejection, touch, @zone, "buy") == nil
+
+    input =
+      bars()
+      |> List.update_at(-2, &Map.merge(&1, touch))
+      |> List.update_at(-1, &Map.merge(&1, rejection))
+
+    setup = SetupEngine.assess(input, @bias, [@zone, @resistance], @now)
+    assert setup.pattern == "zone_rejection_close"
+    assert setup.state == "ready"
+
+    mirror = fn bar ->
+      %{
+        bar
+        | open: 200 - bar.open,
+          close: 200 - bar.close,
+          high: 200 - bar.low,
+          low: 200 - bar.high
+      }
+    end
+
+    assert SetupEngine.assess(
+             Enum.map(input, mirror),
+             %{@bias | side: "sell"},
+             [@zone, @resistance],
+             @now
+           ).pattern == "zone_rejection_close"
+  end
+
   test "short, approximate, stale, duplicate and unconfirmed data fail closed" do
     for bs <- [
           [],
