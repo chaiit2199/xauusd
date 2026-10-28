@@ -55,6 +55,7 @@ defmodule GoldBackend.Services.StrategyPlan do
       end
 
     eligible_zone = if ready, do: GoldBackend.Services.DecisionPlan.entry_zone(setup, spread)
+    reward_risk_diagnostic = reward_risk_diagnostic(setup, entry, spread, quality)
 
     checks = [
       check(
@@ -116,7 +117,7 @@ defmodule GoldBackend.Services.StrategyPlan do
       check(
         "target_structure",
         if(ready, do: is_number(setup.take_profit), else: nil),
-        "Cần mục tiêu từ cấu trúc H1/ngày trước hoặc swing M15 đã xác nhận; không tự tạo TP để đủ R:R."
+        "TP1 cần còn ít nhất 5 USD/oz đến mục tiêu; TP được đặt trước vùng cản đã biết, không kéo xa chỉ để đủ R:R."
       ),
       check(
         "setup_lifetime",
@@ -232,13 +233,8 @@ defmodule GoldBackend.Services.StrategyPlan do
       ),
       check(
         "reward_risk",
-        if(quality,
-          do:
-            quality.reward_risk_ok and quality.reward >= 5.0 - 1.0e-9 and
-              barrier_room?(setup, entry, spread),
-          else: nil
-        ),
-        "R:R thấp cần chờ retest; ước tính sau chi phí."
+        Map.get(reward_risk_diagnostic, :pass),
+        Map.get(reward_risk_diagnostic, :reason, "Chưa xác minh R:R tại entry hiện tại.")
       )
     ]
 
@@ -455,6 +451,7 @@ defmodule GoldBackend.Services.StrategyPlan do
       spread_stop_ratio: if(observed? and risk > 0, do: round2(spread / risk), else: nil),
       reward_risk: if(risk > 0, do: round2(reward / risk), else: 0.0),
       reward_risk_after_spread: if(quality, do: round2(rr)),
+      reward_risk_diagnostic: reward_risk_diagnostic,
       risk_score: if(action == "wait", do: 7, else: 5),
       risk_label: "Cần kiểm chứng",
       block_reason: List.first(reasons),
@@ -505,6 +502,7 @@ defmodule GoldBackend.Services.StrategyPlan do
           ),
         estimated_rr: if(quality, do: round2(quality.reward_risk))
       },
+      reward_risk_diagnostic: reward_risk_diagnostic,
       status: entry_status,
       warnings: warnings,
       reasons: [setup.reason],
@@ -583,6 +581,70 @@ defmodule GoldBackend.Services.StrategyPlan do
         risk = abs(entry - setup.stop_loss)
         risk > 0 and (reward - cost) / (risk + cost) + 1.0e-9 >= StrategyPolicy.min_reward_risk()
     end
+  end
+
+  # Keep the combined UI check, but persist the exact sub-condition which
+  # prevented admission.  This lets operators distinguish a legitimate late
+  # entry from a target that is structurally obstructed.
+  defp reward_risk_diagnostic(_setup, _entry, _cost, nil), do: %{pass: nil, code: "CURRENT_ENTRY_UNVERIFIED"}
+
+  defp reward_risk_diagnostic(setup, entry, cost, quality) do
+    threshold = StrategyPolicy.min_reward_risk()
+    barrier = Map.get(setup, :barrier)
+    barrier_detail = barrier_detail(barrier, setup.action, entry)
+
+    {pass, code, reason} =
+      cond do
+        not quality.levels_ok ->
+          {false, "INVALID_PRICE_GEOMETRY", "Entry hiện tại không còn nằm giữa SL và TP, hoặc SL vượt 5 USD/oz."}
+
+        quality.reward < 5.0 - 1.0e-9 ->
+          {false, "REWARD_SPACE_TOO_SMALL", "Khoảng từ entry hiện tại đến TP chỉ còn #{round2(max(quality.reward, 0.0))} USD/oz; cần tối thiểu 5 USD/oz."}
+
+        not barrier_room?(setup, entry, cost) ->
+          {false, "OBSTACLE_BEFORE_TARGET", barrier_reason(barrier_detail, threshold)}
+
+        not quality.reward_risk_ok ->
+          {false, "RR_BELOW_THRESHOLD", "R:R sau chi phí #{round2(quality.reward_risk)} thấp hơn ngưỡng scalp #{round2(threshold)}; chờ entry/retest tốt hơn."}
+
+        true ->
+          {true, "PASS", "R:R sau chi phí #{round2(quality.reward_risk)} đạt ngưỡng scalp #{round2(threshold)}; còn #{round2(quality.reward)} USD/oz đến TP."}
+      end
+
+    %{
+      pass: pass,
+      code: code,
+      reason: reason,
+      threshold: round2(threshold),
+      reference_entry: round2(setup.entry),
+      current_entry: round2(entry),
+      stop_loss: round2(setup.stop_loss),
+      take_profit: round2(setup.take_profit),
+      risk_to_stop: round2(quality.risk),
+      reward_to_target: round2(max(quality.reward, 0.0)),
+      net_reward_after_spread: round2(quality.reward - cost),
+      reward_risk_after_spread: round2(quality.reward_risk),
+      cost: round2(cost),
+      barrier: barrier_detail
+    }
+  end
+
+  defp barrier_detail(nil, _side, _entry), do: nil
+
+  defp barrier_detail(%{id: id, low: low, high: high}, "buy", entry) do
+    %{id: id, low: round2(low), high: round2(high), distance_from_entry: round2(low - entry)}
+  end
+
+  defp barrier_detail(%{id: id, low: low, high: high}, "sell", entry) do
+    %{id: id, low: round2(low), high: round2(high), distance_from_entry: round2(entry - high)}
+  end
+
+  defp barrier_detail(_, _side, _entry), do: nil
+
+  defp barrier_reason(nil, _threshold), do: "Không còn khoảng R:R hợp lệ tại entry hiện tại sau chi phí."
+
+  defp barrier_reason(barrier, threshold) do
+    "Vùng cản #{barrier.id} cách entry #{barrier.distance_from_entry} USD/oz không còn đủ R:R #{round2(threshold)} sau chi phí."
   end
 
   # Repeat all gates at the final quote; never move the setup's original reference or SL/TP.

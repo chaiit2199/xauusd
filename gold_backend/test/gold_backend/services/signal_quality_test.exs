@@ -102,6 +102,29 @@ defmodule GoldBackend.Services.SignalQualityTest do
     plan = StrategyPlan.build(@indicators, 4000.0, options(s, 4000.0))
     assert plan.action == "wait"
     assert Enum.find(plan.checks, &(&1.code == "reward_risk")).status == "blocked"
+    assert plan.reward_risk_diagnostic.code == "OBSTACLE_BEFORE_TARGET"
+    assert plan.reward_risk_diagnostic.barrier.distance_from_entry == 4.0
+  end
+
+  test "R:R diagnostic separates a late low-RR entry from reward space and barriers" do
+    s = %{setup() | stop_loss: 4004.0, take_profit: 4014.0}
+    plan = StrategyPlan.build(@indicators, 4009.0, options(s, 4009.0))
+
+    assert plan.action == "wait"
+    assert plan.reward_risk_diagnostic.code == "RR_BELOW_THRESHOLD"
+    assert plan.reward_risk_diagnostic.threshold == 1.2
+    assert plan.reward_risk_diagnostic.reward_to_target == 5.0
+    assert plan.reward_risk_diagnostic.cost == 0.4
+    assert plan.decision_plan.reward_risk_diagnostic.code == "RR_BELOW_THRESHOLD"
+  end
+
+  test "R:R diagnostic identifies reward space below the five-dollar scalp target" do
+    s = %{setup() | stop_loss: 4008.0}
+    plan = StrategyPlan.build(@indicators, 4012.0, options(s, 4012.0))
+
+    assert plan.action == "wait"
+    assert plan.reward_risk_diagnostic.code == "REWARD_SPACE_TOO_SMALL"
+    assert plan.reward_risk_diagnostic.reward_to_target == 4.0
   end
 
   test "a quote reaching target invalidates the old setup immediately" do

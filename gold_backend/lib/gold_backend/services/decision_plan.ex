@@ -90,6 +90,7 @@ defmodule GoldBackend.Services.DecisionPlan do
           else:
             "Chưa kiểm tra entry hiện tại. R:R tham chiếu dùng entry trong vùng setup; không chứng minh còn vào được."
         ),
+      reward_risk_diagnostic: Map.get(plan, :reward_risk_diagnostic),
       cost: %{
         spread: plan.spread,
         source: plan.spread_source,
@@ -102,7 +103,7 @@ defmodule GoldBackend.Services.DecisionPlan do
       formed_at: Map.get(setup, :formed_at),
       expires_at: Map.get(setup, :expires_at),
       cancellation: [
-        "Hết hai nến M15 từ xác nhận.",
+        "Hết ba nến M15 từ xác nhận.",
         if(Map.get(setup, :setup_kind) == "breakout_retest" and is_number(stop),
           do:
             "Giá chạm SL #{round2(stop)} hoặc nến M15 đóng #{if setup.action == "buy", do: "dưới hoặc bằng", else: "trên hoặc bằng"} điểm vô hiệu #{round2(Map.get(setup, :invalidation_price) || if(setup.action == "buy", do: zone.low, else: zone.high))}.",
