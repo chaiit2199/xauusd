@@ -267,7 +267,7 @@ export type SignalHistoryData = {
     validity: "active" | "expired" | "invalidated" | "unknown";
     validity_reason: string | null;
     plan: DecisionPlan | null;
-    result: { status: string; entry_touched: boolean; entry_price?: number | null; entry_bar_at?: string | null; exit_bar_at?: string | null; observed_from?: string; observed_through?: string | null; detail?: string };
+    result: { observed_count?: number; observed_high?: number | null; observed_low?: number | null; status: string; entry_touched: boolean; entry_price?: number | null; entry_bar_at?: string | null; exit_bar_at?: string | null; observed_from?: string; observed_through?: string | null; detail?: string };
   }[];
 };
 

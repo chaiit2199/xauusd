@@ -120,7 +120,13 @@ defmodule GoldBackend.Services.TelegramNotifierTest do
     post = fn _, _, _, _ -> flunk("must not send without AI confirm") end
 
     for snapshot <- [
-          %{@snapshot | ai_insight: nil, ai_action: nil, ai_status: "error", ai_error: "AI timeout"},
+          %{
+            @snapshot
+            | ai_insight: nil,
+              ai_action: nil,
+              ai_status: "error",
+              ai_error: "AI timeout"
+          },
           %{@snapshot | ai_action: "wait", ai_status: "ready"},
           %{@snapshot | ai_action: "sell", ai_status: "ready"}
         ] do
@@ -190,5 +196,30 @@ defmodule GoldBackend.Services.TelegramNotifierTest do
 
       refute log =~ "test-token"
     end
+  end
+
+  test "entry alert distinguishes quote time, dispatch time, entry deadline and setup expiry" do
+    now = ~U[2026-11-02 05:12:00Z]
+
+    snapshot = %{
+      signal_valid_until: "2026-11-02T05:13:00Z",
+      cfd_plan: %{
+        trade_direction_label: "countertrend SELL",
+        h1_bias_label: "H1 BUY",
+        timeframe: "M15",
+        entry: 3903.0,
+        stop_loss: 3905.65,
+        take_profit: 3898.65,
+        quote_at: "2026-11-02T05:11:00Z",
+        setup_expires_at: "2026-11-02T05:30:00Z"
+      }
+    }
+
+    text = TelegramNotifier.format_event(snapshot, "READY_TO_ENTER", now)
+    assert text =~ "Tuổi quote lúc gửi: 60 giây"
+    assert text =~ "Bắt đầu gửi UTC: 2026-11-02T05:12:00Z"
+    assert text =~ "Entry được kiểm tra có hiệu lực tới UTC: 2026-11-02T05:13:00Z"
+    assert text =~ "Hết hạn setup UTC: 2026-11-02T05:30:00Z"
+    assert text =~ "không phải bid/ask FXCM"
   end
 end

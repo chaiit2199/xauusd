@@ -53,7 +53,24 @@ defmodule GoldBackend.Services.TelegramNotifier do
          :ok <- validate_event(snapshot, event, now),
          :ok <- validate_config(),
          true <- notification_allowed?(now) do
-      deliver(format_event(snapshot, event), opts)
+      started = System.monotonic_time(:millisecond)
+      result = deliver(format_event(snapshot, event, now), opts)
+
+      Logger.info(
+        "telegram_entry_delivery " <>
+          Jason.encode!(%{
+            setup_id: Map.get(snapshot.cfd_plan, :setup_id),
+            entry: snapshot.cfd_plan.entry,
+            quote_at: Map.get(snapshot.cfd_plan, :quote_at),
+            quote_age_seconds: quote_age(snapshot.cfd_plan, now),
+            send_started_at: DateTime.to_iso8601(now),
+            signal_valid_until: Map.get(snapshot, :signal_valid_until),
+            request_ms: System.monotonic_time(:millisecond) - started,
+            accepted: result == :ok
+          })
+      )
+
+      result
     else
       false -> {:error, :outside_notification_hours}
       error -> error
@@ -106,7 +123,7 @@ defmodule GoldBackend.Services.TelegramNotifier do
 
   defp future?(_, _), do: false
 
-  def format_event(%{cfd_plan: plan}, event) do
+  def format_event(%{cfd_plan: plan} = snapshot, event, now \\ DateTime.utc_now()) do
     side =
       Map.get(
         plan,
@@ -141,12 +158,23 @@ defmodule GoldBackend.Services.TelegramNotifier do
         "#{Map.get(plan, :h1_bias_label, "H1 chưa rõ")} | #{plan.timeframe}",
         "#{if event == "READY_TO_ENTER", do: "Giá kiểm tra", else: "Entry tham chiếu"}: #{entry}",
         "SL: #{plan.stop_loss} | TP1: #{plan.take_profit} | TP2: #{tp2 || "chưa đủ khoảng trống cấu trúc"}",
-        "Hết hạn: #{plan.setup_expires_at}",
+        "Nguồn quote: Gold API XAU/USD · không phải bid/ask FXCM",
+        "Giờ quote UTC: #{Map.get(plan, :quote_at) || "không rõ"} · Tuổi quote lúc gửi: #{quote_age(plan, now) || "không rõ"} giây",
+        "Bắt đầu gửi UTC: #{DateTime.to_iso8601(now)}",
+        "Entry được kiểm tra có hiệu lực tới UTC: #{Map.get(snapshot, :signal_valid_until) || "không rõ"}",
+        "Hết hạn setup UTC: #{plan.setup_expires_at}",
         note,
         Enum.join(Map.get(plan, :soft_flags, []), " · ")
       ],
       "\n"
     )
+  end
+
+  defp quote_age(plan, now) do
+    case DateTime.from_iso8601(Map.get(plan, :quote_at) || "") do
+      {:ok, at, _} -> DateTime.diff(now, at)
+      _ -> nil
+    end
   end
 
   defp deliver(text, opts) do

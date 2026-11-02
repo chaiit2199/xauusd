@@ -106,3 +106,12 @@ export async function fetchSignalHistory(): Promise<SignalHistoryData> {
     return body.data;
   } catch (error) { throw networkError(error); }
 }
+
+export async function fetchCandles(): Promise<import("./template-data").Candle[]> {
+  try {
+    const response = await fetch(`${apiBase}/api/trading/candles`, { headers: { Accept: "application/json" }, cache: "no-store" });
+    const body = await readBody<{ candles: import("./template-data").Candle[] }>(response);
+    if (!response.ok || !Array.isArray(body.data?.candles)) throw new Error(body.message || `HTTP ${response.status}`);
+    return body.data.candles;
+  } catch (error) { throw networkError(error); }
+}

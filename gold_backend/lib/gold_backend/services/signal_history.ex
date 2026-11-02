@@ -275,7 +275,7 @@ defmodule GoldBackend.Services.SignalHistory do
       end)
 
     %{
-      items: items,
+      items: GoldBackend.Services.SignalObservations.enrich(items),
       limit: limit,
       model: "m15-touch-v1",
       summary: Enum.frequencies_by(items, & &1.result["status"]),
