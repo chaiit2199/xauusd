@@ -117,7 +117,7 @@ defmodule GoldBackend.Services.StrategyPlan do
       check(
         "target_structure",
         if(ready, do: is_number(setup.take_profit), else: nil),
-        "TP1 cần còn ít nhất 5 USD/oz đến mục tiêu; TP được đặt trước vùng cản đã biết, không kéo xa chỉ để đủ R:R."
+        "TP1 được xác lập khoảng 5 USD/oz từ entry tham chiếu, trước vùng cản đã biết. Khi xét entry hiện tại, giữ nguyên TP và kiểm tra R:R; không kéo xa TP để đủ điều kiện."
       ),
       check(
         "setup_lifetime",

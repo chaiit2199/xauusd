@@ -20,11 +20,11 @@ export function RuleChecklist({ checks }: { checks: RuleCheck[] }) {
     <div className="rule-legend">{(Object.keys(labels) as RuleCheck["status"][]).map((status) =>
       <span key={status}><RuleIcon status={status}/>{labels[status]} <strong>{counts[status]}</strong></span>
     )}</div>
-    <p className="basis">Điều kiện bắt buộc phải đạt trước khi phát tín hiệu. Khuyến nghị không tự chặn BUY/SELL. “Theo setup” vẫn bắt buộc với nhánh đang xét; điểm vô hiệu bị phá thì setup phải hủy.</p>
+    <p className="basis">PLAN_READY được phát khi setup M15 và các điều kiện lập plan hợp lệ. Điều kiện entry hiện tại chỉ quyết định có thể vào ngay (READY_TO_ENTER); không cần chờ các điều kiện này để phát plan. Khuyến nghị không tự chặn plan hoặc BUY/SELL. Setup hết hạn, bị vô hiệu hoặc đã chạm TP không được phát lại.</p>
     {dataBlockers.length ? <div className="banner bad"><strong>Dữ liệu đang chặn phát tín hiệu</strong><ul>{dataBlockers.map((check) => <li key={check.code}>{check.reason}</li>)}</ul></div> : null}
     <ul className="rule-cards">{checks.map((check) => {
       const status = checkState(check);
-      const scope = check.scope === "current_entry" ? (check.required === false ? "Entry hiện tại · khuyến nghị" : "Bắt buộc khi xét entry hiện tại") : check.required === false ? "Không bắt buộc" : check.scope === "setup" ? "Bắt buộc theo setup" : "Bắt buộc";
+      const scope = check.scope === "current_entry" ? (check.required === false ? "Entry hiện tại · khuyến nghị" : "Bắt buộc khi xét entry hiện tại") : check.required === false ? "Không bắt buộc" : check.scope === "plan" ? "Bắt buộc để phát plan" : check.scope === "setup" ? "Bắt buộc theo setup" : "Bắt buộc";
       return <li key={check.code} className={`rule-card rule-card-${status}`}>
         <RuleIcon status={status}/><div><div className="rule-card-heading"><strong>{ruleLabels[check.code] ?? check.code}</strong><span>{scope}</span></div>
         <p><span className={`rule-state rule-${status}`}>{labels[status]}</span> · {check.reason}</p></div>

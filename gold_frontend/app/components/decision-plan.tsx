@@ -35,7 +35,7 @@ export function DecisionPlan({ plan, confirmation }: { plan: Plan; confirmation?
     <dl className="plan-levels">
       <div><dt>{plan.entry_zone_kind === "watch" ? "Vùng theo dõi · chưa xác nhận" : "Vùng vào tham chiếu"}</dt>
         <dd>{plan.entry_zone ? `${money(plan.entry_zone.low)} – ${money(plan.entry_zone.high)}` : "Chưa có vùng entry đủ điều kiện"}</dd>
-        <p>{plan.entry_zone_kind === "watch" ? "Chờ giá phản ứng và nến M15 xác nhận tại vùng." : plan.entry_policy === "rr_constrained" ? "Khoảng giá đáp ứng cấu trúc, SL ≤ 5 ATR và R:R tới TP/cản đầu tiên ≥ 1,5. Lệch quá 0,30 ATR chỉ cảnh báo; vẫn cần dữ liệu mới." : "Khoảng entry theo chính sách tại thời điểm lưu kế hoạch; vẫn cần kiểm tra hiệu lực và dữ liệu mới."}</p>
+        <p>{plan.entry_zone_kind === "watch" ? "Chờ giá phản ứng và nến M15 xác nhận tại vùng." : plan.entry_policy === "scalp_zone" ? "Vùng entry tham chiếu của setup đã xác nhận. SL cấu trúc tối đa 5 giá; R:R sau chi phí tối thiểu 1,2. Vào ngay vẫn cần quote mới và các điều kiện entry hợp lệ; SL/TP giữ cố định." : plan.entry_policy === "rr_constrained" ? "Khoảng giá đáp ứng cấu trúc, SL ≤ 5 ATR và R:R tới TP/cản đầu tiên ≥ 1,5. Lệch quá 0,30 ATR chỉ cảnh báo; vẫn cần dữ liệu mới." : "Khoảng entry theo chính sách tại thời điểm lưu kế hoạch; vẫn cần kiểm tra hiệu lực và dữ liệu mới."}</p>
       </div>
       <div><dt>SL · Điểm vô hiệu</dt><dd>{plan.stop_loss != null ? money(plan.stop_loss) : "Chờ xác nhận"}</dd><p>{plan.stop_reason}</p></div>
       <div><dt>TP1 · Mục tiêu scalp</dt><dd>{plan.take_profit != null ? money(plan.take_profit) : "Chưa xác định"}</dd><p>{plan.target_reason}</p></div>
