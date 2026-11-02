@@ -44,7 +44,7 @@ export function DecisionPlan({ plan, confirmation }: { plan: Plan; confirmation?
       {plan.reference_entry != null ? <div><dt>Entry tham chiếu · nến xác nhận</dt><dd>{money(plan.reference_entry)}</dd><p>Nến M15 đóng lúc {when(plan.reference_at ?? null)}.</p><p>R:R tại entry tham chiếu: {plan.reference_reward_risk != null ? `1 : ${plan.reference_reward_risk}` : "Chưa đủ căn cứ tính"}. {plan.cost.description}</p></div> : null}
       <div><dt>R:R tại báo giá hiện tại · sau chi phí ước tính</dt><dd>{plan.reward_risk != null ? `1 : ${plan.reward_risk}` : "Chưa kiểm tra entry hiện tại"}</dd>
         {plan.current_entry != null ? <p>Giá nguồn {money(plan.current_entry)} · {when(plan.current_quote_at ?? null)}.</p> : null}
-        <p>{plan.reward_risk_basis}</p>{plan.reward_risk != null || (plan.entry_zone_kind === "eligible" && plan.entry_zone) ? <p>{plan.cost.description}</p> : null}
+        <p>{plan.reward_risk_basis}</p>{plan.reward_risk != null || (plan.entry_zone_kind !== "watch" && plan.entry_zone) ? <p>{plan.cost.description}</p> : null}
         {plan.cost_sensitivity ? <p>Kịch bản chi phí gấp đôi spread ({money(plan.cost_sensitivity.stress_cost)} USD/oz): R:R {plan.cost_sensitivity.stress_reward_risk}, tại {plan.current_entry != null ? "báo giá mới" : "entry tham chiếu"}. Đây là phép thử độ nhạy, không phải điều kiện chặn thêm.</p> : null}
       </div>
     </dl>

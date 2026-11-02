@@ -20,7 +20,7 @@ export type RuleCheck = {
   status: "pass" | "blocked" | "unknown" | "warning";
   reason: string;
   required?: boolean;
-  scope?: "required" | "setup" | "advisory" | "current_entry";
+  scope?: "required" | "setup" | "advisory" | "current_entry" | "plan";
 };
 
 export type CfdPlan = {
@@ -31,6 +31,12 @@ export type CfdPlan = {
   market: string;
   action: "buy" | "sell" | "wait";
   action_label: string;
+  plan_status?: "PLAN_READY" | "PLAN_BLOCKED" | "INVALIDATED" | "EXPIRED";
+  trade_direction?: "buy" | "sell" | "wait";
+  trade_direction_label?: string;
+  h1_bias_label?: string;
+  countertrend?: boolean;
+  plan_blockers?: string[];
   planning_action?: "buy" | "sell" | "wait";
   current_entry_status?: "unchecked" | "eligible" | "blocked";
   entry_admission?: string | null;
@@ -223,7 +229,7 @@ export type DecisionPlan = {
     rolling_24h: { high: number; low: number } | null;
   } | null;
   entry_zone: { low: number; high: number } | null;
-  entry_zone_kind: "eligible" | "watch";
+  entry_zone_kind: "eligible" | "reference" | "watch";
   confirmation: string;
   trigger: string;
   stop_loss: number | null;

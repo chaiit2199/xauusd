@@ -87,7 +87,7 @@ defmodule GoldBackend.Services.EntryFlexTest do
       end
 
       assert StrategyPlan.build(@i, too_late, opts(s, too_late)).action == "wait"
-      broken = if side == "buy", do: s.zone.low, else: s.zone.high
+      broken = s.stop_loss
       assert StrategyPlan.build(@i, broken, opts(s, broken)).setup_status == "invalidated"
     end
   end

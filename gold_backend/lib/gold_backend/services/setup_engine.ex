@@ -41,6 +41,7 @@ defmodule GoldBackend.Services.SetupEngine do
       candidate_log: [],
       branches: [],
       rejected_candidates: [],
+      alternatives: [],
       setup_kind: nil,
       rejection_reason: nil,
       invalidation_price: nil
@@ -76,15 +77,11 @@ defmodule GoldBackend.Services.SetupEngine do
 
         # Confirmed M15 swings may provide location when H1 history is missing.
         m15_locations =
-          if zones == [] do
-            Enum.map(m15_targets, fn z ->
-              z
-              |> Map.delete(:target_only)
-              |> Map.put(:known_at, DateTime.to_iso8601(last.open_time))
-            end)
-          else
-            []
-          end
+          Enum.map(m15_targets, fn z ->
+            z
+            |> Map.delete(:target_only)
+            |> Map.put(:known_at, DateTime.to_iso8601(last.open_time))
+          end)
 
         zones = zones ++ m15_targets ++ m15_locations ++ breakouts
         base = %{base | indicators: i, atr: i.atr_14, entry: last.close, zones: zones}

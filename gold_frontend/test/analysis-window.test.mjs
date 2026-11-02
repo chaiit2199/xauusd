@@ -71,3 +71,29 @@ test("quote expiry preserves the reference plan but clears live RR and price che
   assert.equal(nextCandle.setup_status, "paused");
   assert.equal(nextCandle.checks.find(c => c.code === "trigger").status, "unknown");
 });
+
+test("plan-first quote expiry keeps the plan distinct from immediate entry", () => {
+  const current = { ...board, signal_valid_until: "2026-10-21T13:02:01Z",
+    cfd_plan: { ...board.cfd_plan, setup_status: "signal_ready", plan_status: "PLAN_READY",
+      planning_action: "sell", trade_direction_label: "countertrend SELL", h1_bias_label: "H1 BUY",
+      reference_entry: 3913, setup_expires_at: "2026-10-21T13:45:00Z" } };
+  const stale = expireAnalysis(current, Date.parse(current.signal_valid_until)).cfd_plan;
+  assert.equal(stale.plan_status, "PLAN_READY");
+  assert.equal(stale.trade_plan_status, "PLAN_READY");
+  assert.equal(stale.action, "wait");
+  assert.equal(stale.planning_action, "sell");
+  assert.equal(stale.trade_direction_label, "countertrend SELL");
+  assert.equal(stale.h1_bias_label, "H1 BUY");
+});
+
+test("terminal setup and expired calendar cannot leave PLAN_READY visible", () => {
+  const current = { ...board, calendar_valid_until: "2026-10-21T13:03:00Z",
+    cfd_plan: { ...board.cfd_plan, setup_status: "signal_ready", plan_status: "PLAN_READY",
+      planning_action: "sell", setup_expires_at: "2026-10-21T13:10:00Z" } };
+  const noCalendar = expireAnalysis(current, Date.parse(current.calendar_valid_until)).cfd_plan;
+  assert.equal(noCalendar.plan_status, "PLAN_BLOCKED");
+  assert.equal(noCalendar.planning_action, "wait");
+  const expired = expireAnalysis(current, Date.parse(current.cfd_plan.setup_expires_at)).cfd_plan;
+  assert.equal(expired.plan_status, "EXPIRED");
+  assert.equal(expired.planning_action, "wait");
+});

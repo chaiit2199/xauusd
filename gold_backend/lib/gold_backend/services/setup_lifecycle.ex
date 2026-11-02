@@ -25,69 +25,105 @@ defmodule GoldBackend.Services.SetupLifecycle do
           end)
       ]
 
-      case Enum.find(candidates, &(&1.state == "ready")) do
-        nil ->
-          current
+      all =
+        candidates
+        |> Enum.flat_map(fn s -> [s | Map.get(s, :alternatives, [])] end)
+        |> Enum.filter(&(&1.state == "ready"))
+        |> Enum.uniq_by(& &1.id)
+        |> Enum.map(&validate(&1, m15, bias, now, events))
 
-        setup ->
-          checked = validate(setup, m15, bias, now, events)
-
-          logs =
-            (Map.get(current, :candidate_log, []) ++ Map.get(setup, :candidate_log, []))
-            |> Enum.uniq_by(& &1.id)
-
-          Map.put(checked, :candidate_log, logs)
-      end
+      chosen = Enum.find(all, &(&1.state == "ready")) || List.first(all) || current
+      Map.put(chosen, :alternatives, all)
     end
   end
 
   # Only genuine, closed M5 bars may confirm a previously touched M15 zone.
-  def assess_with_m5(m15, m5, h1, bias, now, events) do
+  def assess_with_m5(m15, m5, h1, bias, now, events, opts \\ []) do
     m15_setup = assess(m15, h1, bias, now, events)
 
-    if m15_setup.state == "data_unavailable" or m5 == [] do
-      m15_setup
-    else
-      slot = CandleClock.closed_at(now, 300)
+    result =
+      if m15_setup.state == "data_unavailable" or m5 == [] do
+        m15_setup
+      else
+        slot = CandleClock.closed_at(now, 300)
 
-      m5_candidates =
-        Enum.map([0, 300, 600, 900], fn offset ->
-          at = DateTime.add(slot, -offset)
-          trigger_open = DateTime.add(at, -300)
+        m5_candidates =
+          Enum.map([0, 300, 600, 900], fn offset ->
+            at = DateTime.add(slot, -offset)
+            trigger_open = DateTime.add(at, -300)
 
-          recent_m15 =
-            m15
-            |> Enum.filter(
-              &(DateTime.compare(DateTime.add(&1.open_time, 900), trigger_open) != :gt)
-            )
-            |> Enum.take(-3)
+            recent_m15 =
+              m15
+              |> Enum.filter(
+                &(DateTime.compare(DateTime.add(&1.open_time, 900), trigger_open) != :gt)
+              )
+              |> Enum.take(-3)
 
-          zones =
-            m15_setup.zones
-            |> Enum.reject(&(Map.get(&1, :target_only, false) or Map.has_key?(&1, :side)))
-            |> Enum.filter(fn z ->
-              Enum.any?(recent_m15, fn b ->
-                known = Map.get(z, :known_at)
-                (is_nil(known) or known <= DateTime.to_iso8601(b.open_time)) and Zoi.touch?(b, z)
+            zones =
+              m15_setup.zones
+              |> Enum.reject(&(Map.get(&1, :target_only, false) or Map.has_key?(&1, :side)))
+              |> Enum.filter(fn z ->
+                Enum.any?(recent_m15, fn b ->
+                  known = Map.get(z, :known_at)
+
+                  (is_nil(known) or known <= DateTime.to_iso8601(b.open_time)) and
+                    Zoi.touch?(b, z)
+                end)
               end)
-            end)
 
-          historical_bias = BiasEngine.assess(h1, trigger_open)
-          setup = SetupEngine.assess(m5, historical_bias, zones, at, nil, 300)
+            historical_bias = BiasEngine.assess(h1, trigger_open)
+            setup = SetupEngine.assess(m5, historical_bias, zones, at, nil, 300)
 
-          if setup.state == "ready", do: validate(setup, m5, bias, now, events), else: setup
-        end)
+            if setup.state == "ready", do: validate(setup, m5, bias, now, events), else: setup
+          end)
 
-      options = Enum.filter([m15_setup | m5_candidates], &(&1.state == "ready"))
+        options = Enum.filter([m15_setup | m5_candidates], &(&1.state == "ready"))
 
-      selected = if options == [], do: m15_setup, else: SetupEngine.select(options, bias)
+        selected = if options == [], do: m15_setup, else: SetupEngine.select(options, bias)
 
-      logs =
-        [m15_setup | m5_candidates]
-        |> Enum.flat_map(&Map.get(&1, :candidate_log, []))
-        |> Enum.uniq_by(& &1.id)
+        logs =
+          [m15_setup | m5_candidates]
+          |> Enum.flat_map(&Map.get(&1, :candidate_log, []))
+          |> Enum.uniq_by(& &1.id)
 
-      %{selected | candidate_log: logs, candidate_count: length(logs)}
+        selected
+        |> Map.merge(%{candidate_log: logs, candidate_count: length(logs)})
+        |> Map.put(
+          :alternatives,
+          [m15_setup | m5_candidates] ++ Map.get(m15_setup, :alternatives, [])
+        )
+      end
+
+    quote = Keyword.get(opts, :quote)
+
+    all =
+      [result | Map.get(result, :alternatives, [])]
+      |> Enum.filter(&is_binary(Map.get(&1, :id)))
+      |> Enum.uniq_by(& &1.id)
+      |> Enum.map(&validate_quote(&1, quote, now))
+
+    valid = Enum.filter(all, &(&1.state == "ready" and not &1.blocked))
+    chosen = if valid == [], do: List.first(all) || result, else: SetupEngine.select(valid, bias)
+
+    if m5 == [] and is_nil(quote),
+      do: result,
+      else: Map.put(chosen, :alternatives, Enum.map(all, &Map.delete(&1, :alternatives)))
+  end
+
+  def validate_quote(setup, quote, now) do
+    if GoldBackend.Services.EntryQuality.fresh_quote?(quote, now) and setup.state == "ready" do
+      q = GoldBackend.Services.EntryQuality.assess(setup, quote.price, 0.0)
+
+      if q.target_reached or not q.structure_ok,
+        do:
+          halt(
+            setup,
+            "invalidated",
+            "Báo giá đã chạm SL hoặc TP; quét setup mới ngay trong lần đánh giá này."
+          ),
+        else: setup
+    else
+      setup
     end
   end
 
@@ -128,6 +164,13 @@ defmodule GoldBackend.Services.SetupLifecycle do
       {StrategyPolicy.version(), seconds, setup.action, setup.zone.id, setup.candle_closed_at}
 
     id = :crypto.hash(:sha256, :erlang.term_to_binary(identity)) |> Base.encode16(case: :lower)
+
+    setup =
+      Map.put_new(
+        setup,
+        :invalidation_price,
+        if(setup.action == "buy", do: setup.zone.low, else: setup.zone.high)
+      )
 
     Map.merge(setup, %{
       id: id,

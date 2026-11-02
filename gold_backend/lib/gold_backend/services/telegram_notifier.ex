@@ -36,47 +36,7 @@ defmodule GoldBackend.Services.TelegramNotifier do
          :ok <- validate_ticket(snapshot),
          :ok <- validate_config(),
          true <- notification_allowed?(Keyword.get(opts, :now, DateTime.utc_now())) do
-      config = Application.get_env(:gold_backend, :telegram, [])
-      token = config |> Keyword.fetch!(:bot_token) |> String.trim()
-      chat = config |> Keyword.fetch!(:chat_id) |> String.trim()
-      post = Keyword.get(opts, :http_post, &HTTPoison.post/4)
-
-      result =
-        post.(
-          "https://api.telegram.org/bot#{token}/sendMessage",
-          Jason.encode!(%{chat_id: chat, text: format_message(snapshot)}),
-          [{"Content-Type", "application/json"}],
-          timeout: 5_000,
-          recv_timeout: 5_000
-        )
-
-      case result do
-        {:ok, %HTTPoison.Response{status_code: status, body: body}} ->
-          case Jason.decode(body) do
-            {:ok, %{"ok" => true}} when status == 200 ->
-              Logger.info("Telegram notification delivered")
-              :ok
-
-            {:ok, %{"description" => description} = response} when is_binary(description) ->
-              code = response["error_code"] || status
-
-              detail =
-                description
-                |> String.replace([token, chat], "[redacted]")
-                |> String.replace(~r/\s+/, " ")
-                |> String.slice(0, 300)
-
-              failure("HTTP #{status}: #{detail}. #{hint(code)}")
-
-            _ ->
-              failure("HTTP #{status}: phản hồi Telegram không hợp lệ.")
-          end
-
-        {:error, %HTTPoison.Error{reason: reason}} ->
-          # Do not log the request URL: it contains the bot token.
-          detail = if is_atom(reason), do: Atom.to_string(reason), else: "network_error"
-          failure("Không kết nối được Telegram (#{detail}); kiểm tra mạng/DNS/TLS của container.")
-      end
+      deliver(format_message(snapshot), opts)
     else
       false -> :ok
       error -> error
@@ -85,13 +45,160 @@ defmodule GoldBackend.Services.TelegramNotifier do
 
   def notify(_, _), do: {:error, "Snapshot không hợp lệ để gửi Telegram."}
 
+  @doc "Plan/entry lifecycle alerts use deterministic checks; AI commentary is optional."
+  def notify_event(snapshot, event, opts \\ []) do
+    now = Keyword.get(opts, :now, DateTime.utc_now())
+
+    with :ok <- validate_event(snapshot, event, now),
+         :ok <- validate_config(),
+         true <- notification_allowed?(now) do
+      deliver(format_event(snapshot, event), opts)
+    else
+      false -> {:error, :outside_notification_hours}
+      error -> error
+    end
+  end
+
+  def validate_event(%{cfd_plan: plan} = snapshot, event, now) do
+    terminal = event in ["INVALIDATED", "EXPIRED"]
+    checks = Map.get(plan, :plan_checks, [])
+    fresh_setup = future?(Map.get(plan, :setup_expires_at), now)
+    calendar = future?(Map.get(snapshot, :calendar_valid_until), now)
+
+    valid_plan =
+      Map.get(plan, :plan_status) == "PLAN_READY" and checks != [] and
+        Enum.all?(checks, &(&1.status == "pass")) and fresh_setup and calendar
+
+    valid =
+      cond do
+        terminal ->
+          String.upcase(Map.get(plan, :setup_status, "")) == event
+
+        event == "PLAN_READY" ->
+          valid_plan
+
+        event == "READY_TO_ENTER" ->
+          valid_plan and plan.action in ["buy", "sell"] and
+            Map.get(plan, :trade_plan_status) == event and
+            future?(Map.get(snapshot, :signal_valid_until), now) and
+            Enum.all?(
+              Map.get(plan, :checks, []),
+              &(not Map.get(&1, :required, true) or &1.status == "pass")
+            )
+
+        event in ["WAIT_RETEST", "PRICE_MOVED"] ->
+          valid_plan and Map.get(plan, :trade_plan_status) == event
+
+        true ->
+          false
+      end
+
+    if valid, do: :ok, else: {:error, :event_not_eligible}
+  end
+
+  defp future?(value, now) when is_binary(value) do
+    case DateTime.from_iso8601(value) do
+      {:ok, at, _} -> DateTime.compare(now, at) == :lt
+      _ -> false
+    end
+  end
+
+  defp future?(_, _), do: false
+
+  def format_event(%{cfd_plan: plan}, event) do
+    side =
+      Map.get(
+        plan,
+        :trade_direction_label,
+        String.upcase(Map.get(plan, :planning_action, "wait"))
+      )
+
+    entry = if event == "READY_TO_ENTER", do: plan.entry, else: plan.reference_entry
+    tp2 = get_in(plan, [:trade_plan, :risk, :tp2])
+
+    note =
+      case event do
+        "PLAN_READY" ->
+          "Kế hoạch từ nến đã đóng; chưa phải xác nhận vào ngay. Chờ báo giá mới để kiểm tra entry."
+
+        "READY_TO_ENTER" ->
+          "Báo giá mới và các hard rule vào ngay đã đạt; đây là tín hiệu nghiên cứu, không phải lệnh đã khớp."
+
+        "WAIT_RETEST" ->
+          "Plan còn hiệu lực; chờ retest đạt điều kiện vào."
+
+        "PRICE_MOVED" ->
+          "Giá đã di chuyển; không đuổi giá, chờ kiểm tra lại entry."
+
+        _ ->
+          "Setup đã kết thúc; đang quét setup mới."
+      end
+
+    Enum.join(
+      [
+        "#{event} · XAUUSD · #{side}",
+        "#{Map.get(plan, :h1_bias_label, "H1 chưa rõ")} | #{plan.timeframe}",
+        "#{if event == "READY_TO_ENTER", do: "Giá kiểm tra", else: "Entry tham chiếu"}: #{entry}",
+        "SL: #{plan.stop_loss} | TP1: #{plan.take_profit} | TP2: #{tp2 || "chưa đủ khoảng trống cấu trúc"}",
+        "Hết hạn: #{plan.setup_expires_at}",
+        note,
+        Enum.join(Map.get(plan, :soft_flags, []), " · ")
+      ],
+      "\n"
+    )
+  end
+
+  defp deliver(text, opts) do
+    config = Application.get_env(:gold_backend, :telegram, [])
+    token = config |> Keyword.fetch!(:bot_token) |> String.trim()
+    chat = config |> Keyword.fetch!(:chat_id) |> String.trim()
+    post = Keyword.get(opts, :http_post, &HTTPoison.post/4)
+
+    result =
+      post.(
+        "https://api.telegram.org/bot#{token}/sendMessage",
+        Jason.encode!(%{chat_id: chat, text: text}),
+        [{"Content-Type", "application/json"}],
+        timeout: 5_000,
+        recv_timeout: 5_000
+      )
+
+    case result do
+      {:ok, %HTTPoison.Response{status_code: status, body: body}} ->
+        case Jason.decode(body) do
+          {:ok, %{"ok" => true}} when status == 200 ->
+            Logger.info("Telegram notification delivered")
+            :ok
+
+          {:ok, %{"description" => description} = response} when is_binary(description) ->
+            code = response["error_code"] || status
+
+            detail =
+              description
+              |> String.replace([token, chat], "[redacted]")
+              |> String.replace(~r/\s+/, " ")
+              |> String.slice(0, 300)
+
+            failure("HTTP #{status}: #{detail}. #{hint(code)}")
+
+          _ ->
+            failure("HTTP #{status}: phản hồi Telegram không hợp lệ.")
+        end
+
+      {:error, %HTTPoison.Error{reason: reason}} ->
+        # Do not log the request URL: it contains the bot token.
+        detail = if is_atom(reason), do: Atom.to_string(reason), else: "network_error"
+        failure("Không kết nối được Telegram (#{detail}); kiểm tra mạng/DNS/TLS của container.")
+    end
+  end
+
   # Notification hours do not alter the rule decision or publication history.
   def notification_allowed?(now) do
     window =
       Application.get_env(
         :gold_backend,
         :notification_hours,
-        System.get_env("TELEGRAM_NOTIFY_HOURS", "14-22")
+        System.get_env("TELEGRAM_NOTIFY_HOURS", "all")
       )
 
     hour = DateTime.add(now, 7 * 3600).hour
@@ -121,7 +228,9 @@ defmodule GoldBackend.Services.TelegramNotifier do
     end
   end
 
-  defp validate_ai_confirm(%{cfd_plan: %{action: side}, ai_action: side, ai_status: "ready"} = snapshot)
+  defp validate_ai_confirm(
+         %{cfd_plan: %{action: side}, ai_action: side, ai_status: "ready"} = snapshot
+       )
        when side in ["buy", "sell"] do
     case AiDecision.validate_reason(Map.get(snapshot, :ai_insight)) do
       {:ok, _} -> :ok

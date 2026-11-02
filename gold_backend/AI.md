@@ -1,3 +1,12 @@
+> Chính sách hiện hành: `scalp-v12-plan-first`. `PLAN_READY` phát từ setup M15
+> hợp lệ, không chờ quote hoặc AI. Telegram gửi các sự kiện plan/entry độc lập
+> với nhận định AI; xem [TELEGRAM.md](TELEGRAM.md). Các mục v7 bên dưới mô tả
+> phiên bản lịch sử. Mức hiện hành: SL cấu trúc tối đa 5 giá (ưu tiên 2–3),
+> R:R sau chi phí tối thiểu 1,2 (1,2–1,5 cảnh báo), TP1 5 giá và TP2 8 giá nếu
+> cấu trúc cho phép. Không kéo SL/TP để đạt rule. H1/chỉ báo/giờ ưu tiên là cảnh báo;
+> dữ liệu, confirmation, hiệu lực setup, hình học giá, tin đỏ và quote mới khi
+> vào ngay vẫn bắt buộc. Bản này có migration `strategy_notifications`.
+
 # Ollama timeout và nhận định tiếng Việt
 
 Giao diện tập trung trên một trang: bảng giá → nhận định AI → tín hiệu
@@ -56,7 +65,7 @@ Telegram chỉ gửi khi AI xác nhận cùng chiều setup (`ai_action` = buy/s
 nhận định tiếng Việt hợp lệ. AI chọn Đứng ngoài hoặc lỗi chất lượng → không gửi.
 Không thay model hay temperature.
 
-## Bộ tín hiệu hiện hành: zoi-v7-structure-ai
+## Bộ tín hiệu lịch sử: zoi-v7-structure-ai
 
 V7 bỏ chỉ báo khỏi điều kiện bắt buộc phát phiếu cấu trúc; AI nhận chỉ báo + tin
 để xác nhận trước khi Telegram. Kế thừa an toàn entry của v6. Không thêm migration;

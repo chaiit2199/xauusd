@@ -237,4 +237,44 @@ defmodule GoldBackend.Services.InsightCacheTest do
       :sys.resume(pid)
     end
   end
+
+  test "reference plan is visible and published while the quote worker is still waiting" do
+    parent = self()
+
+    compute = fn slot ->
+      reference = %{
+        analysis_candle_closed_at: DateTime.to_iso8601(CandleClock.closed_at(slot)),
+        cfd_plan: %{
+          setup_id: "early-plan",
+          action: "wait",
+          entry: 3913.0,
+          plan_status: "PLAN_READY"
+        },
+        phase: :reference
+      }
+
+      GenServer.cast(InsightCache, {:reference_plan, slot, reference})
+      send(parent, {:waiting_for_quote, self()})
+
+      receive do
+        :quote_arrived -> {:ok, %{reference | phase: :quote}}
+      end
+    end
+
+    pid =
+      start_supervised!(
+        {InsightCache,
+         bootstrap: false,
+         compute: compute,
+         publish: fn snapshot -> send(parent, {:published, snapshot.phase}) end}
+      )
+
+    send(pid, :refresh)
+    assert_receive {:waiting_for_quote, worker}, 1000
+    assert_receive {:published, :reference}, 1000
+    assert [{:snapshot, %{phase: :reference}}] = :ets.lookup(InsightCache, :snapshot)
+    assert :sys.get_state(pid).job != nil
+    send(worker, :quote_arrived)
+    assert_receive {:published, :quote}, 1000
+  end
 end

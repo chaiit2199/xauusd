@@ -295,7 +295,11 @@ defmodule GoldBackendWeb.TradingController do
           else: EconomicCalendar.snapshot(now)
 
       events = calendar.events
-      m15_setup = SetupLifecycle.assess_with_m5(m15, m5, closed_h1_bars, bias, now, events)
+
+      m15_setup =
+        SetupLifecycle.assess_with_m5(m15, m5, closed_h1_bars, bias, now, events,
+          quote: Keyword.get(opts, :quote)
+        )
 
       m15_setup =
         if Keyword.get(opts, :stored_only, false),
@@ -336,6 +340,7 @@ defmodule GoldBackendWeb.TradingController do
          ohlc_feed: feed,
          m15_setup: m15_setup,
          m15_candles: m15,
+         h1_candles: closed_h1_bars,
          m5_candles: m5,
          prices: prices,
          news: news,

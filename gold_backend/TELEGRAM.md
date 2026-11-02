@@ -2,18 +2,22 @@
 
 Dockerfile không sao chép `rel/`, vì vậy cấu hình trong `rel/env.sh.eex` không
 được đưa vào image. Docker Compose nhận thông tin bot từ `env.sh` trên VPS.
-Luồng hiện hành: rule phát phiếu cấu trúc `buy`/`sell` → gửi setup kèm chỉ báo và
-tin cho AI → chỉ khi AI xác nhận cùng chiều và nhận định hợp lệ mới gửi Telegram,
-một lần cho mỗi setup. AI chọn Đứng ngoài hoặc lỗi chất lượng thì không gửi.
-Không giới hạn một phiếu mỗi phiên trên website/lịch sử.
-Khung gửi thông báo tách khỏi khung phân tích: `TELEGRAM_NOTIFY_HOURS=14-22`
-(mặc định, giờ Việt Nam), `all` để nhận cả ngày hoặc `22-7` cho khung qua nửa đêm.
-Website vẫn phân tích và lưu tín hiệu ngoài giờ thông báo. Tín hiệu bị bỏ qua ngoài
-khung không được xếp hàng gửi lại khi mở khung vì có thể đã hết hạn.
-`wait` / “Đứng ngoài” không gửi. Đây là tín hiệu tham khảo, không xác nhận lệnh khớp.
-Nhận định hết chu kỳ M15 không được gửi. Khi chưa cấu hình `GOLD_API_KEY`, nguồn lỗi hoặc chưa đủ 30 nến M15 và 50 nến H1,
-tín hiệu giữ `wait`, nên chưa có thông báo Buy/Sell. OHLC được đồng bộ tự động
-35 giây sau các mốc đóng nến; xem tiến độ trên giao diện và hướng dẫn trong [AI.md](AI.md).
+Luồng hiện hành (`scalp-v12-plan-first`): phát `PLAN_READY` khi setup M15 đã
+xác nhận và vượt qua các kiểm tra bắt buộc, trước khi chờ quote realtime hoặc AI.
+Plan không có nghĩa là vào ngay. Quote mới kiểm tra entry và chuyển sang
+`READY_TO_ENTER`, `WAIT_RETEST`, `PRICE_MOVED` hoặc `INVALIDATED`.
+AI chỉ bổ sung nhận định, không chặn Telegram. SL/TP giữ theo cấu trúc gốc.
+
+Mỗi setup/event đã gửi thành công được lưu vào `strategy_notifications` để chống
+lặp qua lần refresh/restart. Lỗi gửi được thử lại khi đánh giá tiếp theo; setup hết
+hạn/vô hiệu không được phát lại plan. Đây là chống lặp theo trạng thái lưu trong DB,
+không bảo đảm exactly-once nếu tiến trình chết sau khi Telegram nhận nhưng trước
+khi DB commit. Thông báo không xác nhận lệnh đã khớp.
+
+Khung gửi mặc định `TELEGRAM_NOTIFY_HOURS=all`. Có thể đặt `14-22` hoặc `22-7`
+(giờ Việt Nam); cấu hình cửa sổ này vẫn được tôn trọng. Giờ ưu tiên giao dịch chỉ
+là cảnh báo. Plan còn hợp lệ có thể được gửi khi cửa sổ thông báo mở lại.
+Bản này cần migration tạo `strategy_notifications` trước khi chạy API mới.
 
 1. Trên VPS, sửa `/home/deploy_user/xauusd/env.sh`, đặt đủ hai biến bằng giá trị
    thật (không đưa token vào Git hoặc log):
@@ -21,7 +25,7 @@ tín hiệu giữ `wait`, nên chưa có thông báo Buy/Sell. OHLC được đ�
    ```bash
    export TELEGRAM_BOT_TOKEN='...'
    export TELEGRAM_CHAT_ID='...'
-   export TELEGRAM_NOTIFY_HOURS='14-22'
+   export TELEGRAM_NOTIFY_HOURS='all'
    ```
 
 2. Với chat cá nhân, mở đúng bot trong Telegram và gửi `/start`. Nếu dùng
@@ -40,7 +44,7 @@ tín hiệu giữ `wait`, nên chưa có thông báo Buy/Sell. OHLC được đ�
    Kết quả cần là `%{configured: true, missing: []}`. Kết quả này xác nhận đủ
    cấu hình; việc Telegram chấp nhận tin được xác nhận bằng log gửi thành công.
 5. Đợi setup M15 được xác nhận; điều kiện phát tín hiệu kiểm tra lại mỗi phút, rồi xem log.
-   Nếu kết quả là “Đứng ngoài”, không có tin Telegram là hành vi đúng:
+   Kiểm tra `plan_status` và `plan_blockers`: `action=wait` vẫn có thể có `PLAN_READY`.
 
    ```bash
    docker logs --since 30m xauusd-api-1 2>&1 | grep -E 'Telegram|Analysis|Ollama|Vietnamese|expired M15'

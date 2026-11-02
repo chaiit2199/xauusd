@@ -118,12 +118,12 @@ defmodule GoldBackend.Services.SignalQualityTest do
     assert plan.decision_plan.reward_risk_diagnostic.code == "RR_BELOW_THRESHOLD"
   end
 
-  test "R:R diagnostic identifies reward space below the five-dollar scalp target" do
+  test "remaining reward below the original target is judged by net RR" do
     s = %{setup() | stop_loss: 4008.0}
     plan = StrategyPlan.build(@indicators, 4012.0, options(s, 4012.0))
 
     assert plan.action == "wait"
-    assert plan.reward_risk_diagnostic.code == "REWARD_SPACE_TOO_SMALL"
+    assert plan.reward_risk_diagnostic.code == "RR_BELOW_THRESHOLD"
     assert plan.reward_risk_diagnostic.reward_to_target == 4.0
   end
 

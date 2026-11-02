@@ -172,6 +172,7 @@ defmodule GoldBackend.Services.InsightCache do
       last_slot: nil,
       timer: timer,
       compute: Keyword.get(opts, :compute, &compute/1),
+      publish: Keyword.get(opts, :publish, &GoldBackend.Services.PlanPublisher.publish/1),
       restore: Keyword.get(opts, :restore, &TradingController.stored_snapshot/0)
     }
 
@@ -239,10 +240,24 @@ defmodule GoldBackend.Services.InsightCache do
             snapshot
         end
 
+      previous =
+        case :ets.lookup(@table, :snapshot) do
+          [{:snapshot, old}] -> old
+          _ -> nil
+        end
+
       :ets.insert(@table, {:snapshot, snapshot})
 
+      Task.Supervisor.start_child(GoldBackend.TaskSupervisor, fn ->
+        if previous &&
+             Map.get(previous.cfd_plan, :setup_id) != Map.get(snapshot.cfd_plan, :setup_id),
+           do: GoldBackend.Services.PlanPublisher.publish_terminal(previous)
+
+        Map.get(state, :publish, &GoldBackend.Services.PlanPublisher.publish/1).(snapshot)
+      end)
+
       if context do
-        # Structure signal publishes first. Telegram waits for AI confirm (same buy/sell).
+        # Plan lifecycle notifications publish independently. AI remains commentary.
         Task.Supervisor.start_child(GoldBackend.TaskSupervisor, fn ->
           result = AiDecision.analyze(context)
 
@@ -293,19 +308,21 @@ defmodule GoldBackend.Services.InsightCache do
     if ohlc_feed.error, do: Logger.warning("OHLC: #{ohlc_feed.error}")
     GoldBackend.Services.SignalHistory.refresh()
 
-    quote =
-      case GoldOhlc.quote() do
-        {:ok, value} -> value
-        _ -> nil
-      end
-
     with {:ok, context} <-
            TradingController.build_context(
              as_of: DateTime.utc_now(),
              ohlc_feed: ohlc_feed,
-             quote: quote,
+             quote: nil,
              news_two_days: true
-           ) do
+           ),
+         {:ok, {context, _}} <- DecisionJournal.record(context) do
+      # Publish the completed-candle reference plan before waiting on a quote
+      # provider or AI. This message is explicitly not an immediate-entry signal.
+      GenServer.cast(
+        __MODULE__,
+        {:reference_plan, slot, TradingController.rule_snapshot(context)}
+      )
+
       current_quote =
         case GoldOhlc.quote() do
           {:ok, value} -> value
@@ -355,6 +372,28 @@ defmodule GoldBackend.Services.InsightCache do
   end
 
   @impl true
+  def handle_cast({:reference_plan, slot, snapshot}, state) do
+    if state.job_slot == slot and state.job != nil and
+         CandleClock.current?(CandleClock.closed_at(slot), DateTime.utc_now()) do
+      old =
+        case :ets.lookup(@table, :snapshot) do
+          [{:snapshot, old}] -> old
+          _ -> nil
+        end
+
+      :ets.insert(@table, {:snapshot, snapshot})
+
+      Task.Supervisor.start_child(GoldBackend.TaskSupervisor, fn ->
+        if old && Map.get(old.cfd_plan, :setup_id) != Map.get(snapshot.cfd_plan, :setup_id),
+          do: GoldBackend.Services.PlanPublisher.publish_terminal(old)
+
+        Map.get(state, :publish, &GoldBackend.Services.PlanPublisher.publish/1).(snapshot)
+      end)
+    end
+
+    {:noreply, state}
+  end
+
   def handle_cast({:commentary, candle, action, result, setup_id, entry}, state) do
     case :ets.lookup(@table, :snapshot) do
       [{:snapshot, snapshot}] ->
@@ -375,7 +414,7 @@ defmodule GoldBackend.Services.InsightCache do
           updated = apply_commentary(snapshot, result)
           :ets.insert(@table, {:snapshot, updated})
 
-          if telegram_confirmed?(updated) do
+          if not Map.has_key?(updated.cfd_plan, :plan_status) and telegram_confirmed?(updated) do
             Task.Supervisor.start_child(GoldBackend.TaskSupervisor, fn ->
               TelegramNotifier.notify(updated)
             end)
@@ -389,7 +428,12 @@ defmodule GoldBackend.Services.InsightCache do
     {:noreply, state}
   end
 
-  def telegram_confirmed?(%{cfd_plan: %{action: side}, ai_action: side, ai_insight: text, ai_status: "ready"})
+  def telegram_confirmed?(%{
+        cfd_plan: %{action: side},
+        ai_action: side,
+        ai_insight: text,
+        ai_status: "ready"
+      })
       when side in ["buy", "sell"] and is_binary(text),
       do: true
 

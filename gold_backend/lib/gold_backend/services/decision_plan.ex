@@ -53,7 +53,7 @@ defmodule GoldBackend.Services.DecisionPlan do
         setup.reason
       ],
       entry_zone: entry_zone,
-      entry_zone_kind: if(confirmed, do: "eligible", else: "watch"),
+      entry_zone_kind: if(confirmed, do: "reference", else: "watch"),
       confirmation:
         if(plan.action in ["buy", "sell"],
           do: "M15 đã xác nhận; các điều kiện phát tín hiệu hiện đều đạt.",
@@ -137,11 +137,11 @@ defmodule GoldBackend.Services.DecisionPlan do
     if side == "buy" do
       range(
         max(low + 0.01, stop + 0.01),
-        Enum.min([high, stop + 5.0, target - 5.0, (target + r * stop) / (1 + r) - cost])
+        Enum.min([high, stop + 5.0, (target + r * stop) / (1 + r) - cost])
       )
     else
       range(
-        Enum.max([low, stop - 5.0, target + 5.0, (target + r * stop) / (1 + r) + cost]),
+        Enum.max([low, stop - 5.0, (target + r * stop) / (1 + r) + cost]),
         min(high - 0.01, stop - 0.01)
       )
     end

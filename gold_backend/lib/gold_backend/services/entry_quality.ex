@@ -17,15 +17,10 @@ defmodule GoldBackend.Services.EntryQuality do
           else: setup.take_profit < price and price < setup.stop_loss
         )
 
-    structure =
-      if Map.get(setup, :setup_kind) == "breakout_retest" do
-        if buy?, do: price > setup.stop_loss, else: price < setup.stop_loss
-      else
-        case Map.get(setup, :zone) do
-          %{low: low, high: high} -> if buy?, do: price > low, else: price < high
-          _ -> true
-        end
-      end
+    # Live quotes invalidate at the frozen SL. A close through the structural
+    # invalidation boundary is handled by SetupLifecycle using completed bars.
+    # Merely leaving the reference zone is advisory, not a synthetic stop.
+    structure = if buy?, do: price > setup.stop_loss, else: price < setup.stop_loss
 
     rr = if risk > 0, do: (reward - cost) / (risk + cost), else: 0.0
 
