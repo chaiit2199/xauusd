@@ -1,3 +1,7 @@
+> Telegram hiện chỉ gửi `READY_TO_ENTER` khi quote mới và các hard rule entry đạt.
+> `PLAN_READY`, `WAIT_RETEST`, `PRICE_MOVED`, `INVALIDATED`, `EXPIRED` chỉ cập nhật trên website.
+> Mỗi setup chỉ gửi READY_TO_ENTER thành công một lần; gửi lỗi được thử lại khi vẫn đủ điều kiện.
+
 > Chính sách hiện hành: `scalp-v12-plan-first`. `PLAN_READY` phát từ setup M15
 > hợp lệ, không chờ quote hoặc AI. Telegram gửi các sự kiện plan/entry độc lập
 > với nhận định AI; xem [TELEGRAM.md](TELEGRAM.md). Các mục v7 bên dưới mô tả

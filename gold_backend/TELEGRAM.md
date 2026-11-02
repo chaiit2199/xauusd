@@ -1,3 +1,7 @@
+> Telegram hiện chỉ gửi `READY_TO_ENTER` khi quote mới và các hard rule entry đạt.
+> `PLAN_READY`, `WAIT_RETEST`, `PRICE_MOVED`, `INVALIDATED`, `EXPIRED` chỉ cập nhật trên website.
+> Mỗi setup chỉ gửi READY_TO_ENTER thành công một lần; gửi lỗi được thử lại khi vẫn đủ điều kiện.
+
 # Telegram trên Docker/Jenkins
 
 Dockerfile không sao chép `rel/`, vì vậy cấu hình trong `rel/env.sh.eex` không

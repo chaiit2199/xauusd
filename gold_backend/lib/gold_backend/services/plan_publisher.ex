@@ -16,28 +16,11 @@ defmodule GoldBackend.Services.PlanPublisher do
 
     snapshot = %{snapshot | cfd_plan: plan}
 
-    announced =
-      Repo.exists?(
-        from n in "strategy_notifications", where: n.setup_id == ^id and n.event == "PLAN_READY"
-      )
-
     events =
-      cond do
-        Map.get(plan, :plan_status) == "PLAN_READY" ->
-          [
-            "PLAN_READY"
-            | if(plan.trade_plan_status in ["READY_TO_ENTER", "WAIT_RETEST", "PRICE_MOVED"],
-                do: [plan.trade_plan_status],
-                else: []
-              )
-          ]
-
-        announced and plan.setup_status in ["invalidated", "expired"] ->
-          [String.upcase(plan.setup_status)]
-
-        true ->
-          []
-      end
+      if Map.get(plan, :plan_status) == "PLAN_READY" and
+           Map.get(plan, :trade_plan_status) == "READY_TO_ENTER",
+         do: ["READY_TO_ENTER"],
+         else: []
 
     Enum.map(events, fn event ->
       # Transaction-scoped lock is released on process exit; no persistent session lock.

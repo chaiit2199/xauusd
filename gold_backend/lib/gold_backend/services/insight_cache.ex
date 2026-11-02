@@ -7,7 +7,6 @@ defmodule GoldBackend.Services.InsightCache do
     CandleClock,
     GoldOhlc,
     OhlcSync,
-    TelegramNotifier,
     DecisionJournal
   }
 
@@ -413,12 +412,6 @@ defmodule GoldBackend.Services.InsightCache do
              candle == DateTime.to_iso8601(CandleClock.closed_at(DateTime.utc_now())) do
           updated = apply_commentary(snapshot, result)
           :ets.insert(@table, {:snapshot, updated})
-
-          if not Map.has_key?(updated.cfd_plan, :plan_status) and telegram_confirmed?(updated) do
-            Task.Supervisor.start_child(GoldBackend.TaskSupervisor, fn ->
-              TelegramNotifier.notify(updated)
-            end)
-          end
         end
 
       _ ->

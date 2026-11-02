@@ -49,7 +49,8 @@ defmodule GoldBackend.Services.TelegramNotifier do
   def notify_event(snapshot, event, opts \\ []) do
     now = Keyword.get(opts, :now, DateTime.utc_now())
 
-    with :ok <- validate_event(snapshot, event, now),
+    with :ok <- if(event == "READY_TO_ENTER", do: :ok, else: {:error, :event_disabled}),
+         :ok <- validate_event(snapshot, event, now),
          :ok <- validate_config(),
          true <- notification_allowed?(now) do
       deliver(format_event(snapshot, event), opts)

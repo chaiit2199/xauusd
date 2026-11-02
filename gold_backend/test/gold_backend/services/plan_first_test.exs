@@ -88,17 +88,28 @@ defmodule GoldBackend.Services.PlanFirstTest do
     {:ok, %HTTPoison.Response{status_code: 200, body: ~s({"ok":true})}}
   end
 
-  test "confirmed countertrend SELL publishes a plan at 3913 without waiting for quote or AI" do
+  test "confirmed countertrend SELL creates a plan at 3913 without sending Telegram before entry is ready" do
     p = build(setup_plan())
     assert p.plan_status == "PLAN_READY" and p.trade_plan_status == "PLAN_READY"
     assert p.planning_action == "sell" and p.action == "wait"
     assert p.trade_direction_label == "countertrend SELL"
     assert p.h1_bias_label == "H1 BUY"
     assert Enum.all?(p.plan_checks, &(&1.status == "pass"))
-    assert [{:ok, :sent}] = PlanPublisher.publish(snapshot(p), now: @now, http_post: &post/4)
-    assert_receive {:telegram, text}
-    assert text =~ "PLAN_READY" and text =~ "countertrend SELL" and text =~ "3913"
-    assert text =~ "chưa phải xác nhận vào ngay"
+    assert [] = PlanPublisher.publish(snapshot(p), now: @now, http_post: &post/4)
+    refute_receive {:telegram, _}
+
+    for event <- ["PLAN_READY", "WAIT_RETEST", "PRICE_MOVED", "INVALIDATED", "EXPIRED"] do
+      assert {:error, :event_disabled} =
+               TelegramNotifier.notify_event(snapshot(p), event, now: @now, http_post: &post/4)
+
+      assert [] =
+               PlanPublisher.publish(snapshot(%{p | trade_plan_status: event}),
+                 now: @now,
+                 http_post: &post/4
+               )
+    end
+
+    refute_receive {:telegram, _}
   end
 
   test "fresh quote alone advances eligible plan, keeping the frozen SL/TP" do
@@ -110,9 +121,9 @@ defmodule GoldBackend.Services.PlanFirstTest do
     # A 4.9-price remaining reward does not impose an artificial five-price gate.
     assert live.take_distance == 4.9
     PlanPublisher.publish(snapshot(pending), now: @now, http_post: &post/4)
-    assert_receive {:telegram, _}
+    refute_receive {:telegram, _}
 
-    assert [{:ok, :already_sent}, {:ok, :sent}] =
+    assert [{:ok, :sent}] =
              PlanPublisher.publish(snapshot(live), now: @now, http_post: &post/4)
 
     assert_receive {:telegram, text}
@@ -182,7 +193,7 @@ defmodule GoldBackend.Services.PlanFirstTest do
   end
 
   test "failed Telegram delivery is retried, and success is durable rather than tied to process memory" do
-    data = snapshot(build(setup_plan()))
+    data = snapshot(build(setup_plan(), quote: %{price: 3912.9, timestamp: @now}))
     fail = fn _, _, _, _ -> {:error, %HTTPoison.Error{reason: :timeout}} end
     assert [{:ok, {:error, _}}] = PlanPublisher.publish(data, now: @now, http_post: fail)
     assert [{:ok, :sent}] = PlanPublisher.publish(data, now: @now, http_post: &post/4)
@@ -193,7 +204,12 @@ defmodule GoldBackend.Services.PlanFirstTest do
 
   test "terminal setup is skipped and a different valid confirmation is selected in the same scan" do
     s = setup_plan()
-    PlanPublisher.publish(snapshot(build(s)), now: @now, http_post: &post/4)
+
+    PlanPublisher.publish(snapshot(build(s, quote: %{price: 3912.9, timestamp: @now})),
+      now: @now,
+      http_post: &post/4
+    )
+
     assert_receive {:telegram, _}
     old = SetupLifecycle.validate_quote(s, %{price: 3899.0, timestamp: @now}, @now)
 
@@ -210,13 +226,14 @@ defmodule GoldBackend.Services.PlanFirstTest do
       )
 
     assert selected.id == alternative.id and selected.state == "ready"
-    # A delayed task carrying the old PLAN_READY cannot resurrect it.
-    assert [{:ok, :sent}] =
-             PlanPublisher.publish(snapshot(build(s)), now: @now, http_post: &post/4)
+    # A delayed ready snapshot cannot resurrect or announce a terminal setup.
+    assert [] =
+             PlanPublisher.publish(snapshot(build(s, quote: %{price: 3912.9, timestamp: @now})),
+               now: @now,
+               http_post: &post/4
+             )
 
-    assert_receive {:telegram, terminal}
-    assert terminal =~ "INVALIDATED"
-    refute terminal =~ "PLAN_READY"
+    refute_receive {:telegram, _}
 
     assert [] =
              PlanPublisher.publish(
