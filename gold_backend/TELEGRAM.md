@@ -1,3 +1,10 @@
+> Nội dung READY_TO_ENTER hiện dùng ba câu AI: Lý do / Cơ hội / Rủi ro.
+> Ollama nhận setup, chỉ báo và tối đa 20 tin hôm nay/hôm qua UTC, `think: false`;
+> chỉ lấy JSON phản hồi đã kiểm tra, không lấy trường thinking. AI không thay hướng hoặc SL/TP.
+> Sau AI, lấy lại quote và chạy lại rule. Setup đổi, giá không đạt, hết chu kỳ hoặc AI lỗi thì bỏ lần gửi;
+> chỉ ghi chống trùng khi Telegram chấp nhận. Lượt đánh giá sau có thể thử lại.
+> Không có câu viết sẵn thay thế nội dung AI. Website dùng lại phần giải thích để tránh gọi model hai lần.
+
 > Telegram hiện chỉ gửi `READY_TO_ENTER` khi quote mới và các hard rule entry đạt.
 > `PLAN_READY`, `WAIT_RETEST`, `PRICE_MOVED`, `INVALIDATED`, `EXPIRED` chỉ cập nhật trên website.
 > Mỗi setup chỉ gửi READY_TO_ENTER thành công một lần; gửi lỗi được thử lại khi vẫn đủ điều kiện.

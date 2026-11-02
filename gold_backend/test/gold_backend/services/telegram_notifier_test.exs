@@ -202,8 +202,15 @@ defmodule GoldBackend.Services.TelegramNotifierTest do
     now = ~U[2026-11-02 05:12:00Z]
 
     snapshot = %{
+      entry_brief: %{
+        "reason" =>
+          "Cấu trúc giảm đã được xác nhận tại vùng cản, trong khi động lượng chưa đồng thuận.",
+        "opportunity" => "Giá có thể tiếp tục giảm về vùng hỗ trợ nếu áp lực bán được duy trì.",
+        "risk" => "Giao dịch ngược xu hướng lớn nên có thể bật lại; chưa có dữ liệu tin tức."
+      },
       signal_valid_until: "2026-11-02T05:13:00Z",
       cfd_plan: %{
+        action: "sell",
         trade_direction_label: "countertrend SELL",
         h1_bias_label: "H1 BUY",
         timeframe: "M15",
@@ -216,10 +223,13 @@ defmodule GoldBackend.Services.TelegramNotifierTest do
     }
 
     text = TelegramNotifier.format_event(snapshot, "READY_TO_ENTER", now)
-    assert text =~ "Tuổi quote lúc gửi: 60 giây"
-    assert text =~ "Bắt đầu gửi UTC: 2026-11-02T05:12:00Z"
-    assert text =~ "Entry được kiểm tra có hiệu lực tới UTC: 2026-11-02T05:13:00Z"
-    assert text =~ "Hết hạn setup UTC: 2026-11-02T05:30:00Z"
-    assert text =~ "không phải bid/ask FXCM"
+    assert text =~ "60 giây tuổi"
+    assert text =~ "Gửi UTC: 2026-11-02T05:12:00Z"
+    assert text =~ "Hiệu lực entry tới: 2026-11-02T05:13:00Z"
+    assert text =~ "SL: 3905.65 | TP1: 3898.65 | TP2: —"
+    assert text =~ "Lý do:"
+    assert text =~ "Cơ hội:"
+    assert text =~ "Rủi ro:"
+    refute text =~ "thinking"
   end
 end

@@ -171,7 +171,7 @@ defmodule GoldBackend.Services.InsightCache do
       last_slot: nil,
       timer: timer,
       compute: Keyword.get(opts, :compute, &compute/1),
-      publish: Keyword.get(opts, :publish, &GoldBackend.Services.PlanPublisher.publish/1),
+      publish: Keyword.get(opts, :publish, &GoldBackend.Services.EntryAlert.publish/1),
       restore: Keyword.get(opts, :restore, &TradingController.stored_snapshot/0)
     }
 
@@ -221,6 +221,7 @@ defmodule GoldBackend.Services.InsightCache do
 
     if CandleClock.current?(CandleClock.closed_at(state.job_slot), DateTime.utc_now()) do
       context = Map.get(snapshot, :commentary_context)
+      {entry_context, snapshot} = Map.pop(snapshot, :entry_context)
       snapshot = Map.delete(snapshot, :commentary_context)
 
       snapshot =
@@ -252,11 +253,13 @@ defmodule GoldBackend.Services.InsightCache do
              Map.get(previous.cfd_plan, :setup_id) != Map.get(snapshot.cfd_plan, :setup_id),
            do: GoldBackend.Services.PlanPublisher.publish_terminal(previous)
 
-        Map.get(state, :publish, &GoldBackend.Services.PlanPublisher.publish/1).(snapshot)
+        Map.get(state, :publish, &GoldBackend.Services.EntryAlert.publish/1).(
+          Map.put(snapshot, :entry_context, entry_context)
+        )
       end)
 
-      if context do
-        # Plan lifecycle notifications publish independently. AI remains commentary.
+      if context && is_nil(entry_context) do
+        # Legacy snapshots only. New entry alerts share their AI brief with the UI.
         Task.Supervisor.start_child(GoldBackend.TaskSupervisor, fn ->
           result = AiDecision.analyze(context)
 
@@ -357,6 +360,8 @@ defmodule GoldBackend.Services.InsightCache do
                     {:error, "Phiếu đã phát trước đó; chưa có bình luận AI trong bộ nhớ."}
                   ),
                 else: snapshot
+
+            snapshot = Map.put(snapshot, :entry_context, context)
 
             {:ok,
              if(publish?, do: Map.put(snapshot, :commentary_context, context), else: snapshot)}

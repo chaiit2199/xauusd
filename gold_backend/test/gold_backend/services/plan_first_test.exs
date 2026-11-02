@@ -75,6 +75,12 @@ defmodule GoldBackend.Services.PlanFirstTest do
   defp snapshot(plan),
     do: %{
       cfd_plan: plan,
+      entry_brief: %{
+        "reason" =>
+          "Cấu trúc giảm đã được xác nhận tại vùng cản, trong khi động lượng chưa đồng thuận.",
+        "opportunity" => "Giá có thể tiếp tục giảm về vùng hỗ trợ nếu áp lực bán được duy trì.",
+        "risk" => "Giao dịch ngược xu hướng lớn nên có thể bật lại; chưa có dữ liệu tin tức."
+      },
       ai_action: "wait",
       ai_status: "error",
       ai_insight: nil,
@@ -127,7 +133,7 @@ defmodule GoldBackend.Services.PlanFirstTest do
              PlanPublisher.publish(snapshot(live), now: @now, http_post: &post/4)
 
     assert_receive {:telegram, text}
-    assert text =~ "READY_TO_ENTER"
+    assert text =~ "XAUUSD · SELL"
     PlanPublisher.publish(snapshot(live), now: @now, http_post: &post/4)
     refute_receive {:telegram, _}
   end

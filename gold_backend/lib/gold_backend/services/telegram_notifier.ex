@@ -51,6 +51,7 @@ defmodule GoldBackend.Services.TelegramNotifier do
 
     with :ok <- if(event == "READY_TO_ENTER", do: :ok, else: {:error, :event_disabled}),
          :ok <- validate_event(snapshot, event, now),
+         :ok <- AiDecision.validate_brief(Map.get(snapshot, :entry_brief)),
          :ok <- validate_config(),
          true <- notification_allowed?(now) do
       started = System.monotonic_time(:millisecond)
@@ -123,52 +124,33 @@ defmodule GoldBackend.Services.TelegramNotifier do
 
   defp future?(_, _), do: false
 
-  def format_event(%{cfd_plan: plan} = snapshot, event, now \\ DateTime.utc_now()) do
-    side =
-      Map.get(
-        plan,
-        :trade_direction_label,
-        String.upcase(Map.get(plan, :planning_action, "wait"))
-      )
-
-    entry = if event == "READY_TO_ENTER", do: plan.entry, else: plan.reference_entry
+  def format_event(%{cfd_plan: plan} = snapshot, _event, now \\ DateTime.utc_now()) do
+    brief = Map.get(snapshot, :entry_brief, %{})
+    side = plan.action |> String.upcase()
     tp2 = get_in(plan, [:trade_plan, :risk, :tp2])
-
-    note =
-      case event do
-        "PLAN_READY" ->
-          "Kế hoạch từ nến đã đóng; chưa phải xác nhận vào ngay. Chờ báo giá mới để kiểm tra entry."
-
-        "READY_TO_ENTER" ->
-          "Báo giá mới và các hard rule vào ngay đã đạt; đây là tín hiệu nghiên cứu, không phải lệnh đã khớp."
-
-        "WAIT_RETEST" ->
-          "Plan còn hiệu lực; chờ retest đạt điều kiện vào."
-
-        "PRICE_MOVED" ->
-          "Giá đã di chuyển; không đuổi giá, chờ kiểm tra lại entry."
-
-        _ ->
-          "Setup đã kết thúc; đang quét setup mới."
-      end
 
     Enum.join(
       [
-        "#{event} · XAUUSD · #{side}",
-        "#{Map.get(plan, :h1_bias_label, "H1 chưa rõ")} | #{plan.timeframe}",
-        "#{if event == "READY_TO_ENTER", do: "Giá kiểm tra", else: "Entry tham chiếu"}: #{entry}",
-        "SL: #{plan.stop_loss} | TP1: #{plan.take_profit} | TP2: #{tp2 || "chưa đủ khoảng trống cấu trúc"}",
-        "Nguồn quote: Gold API XAU/USD · không phải bid/ask FXCM",
-        "Giờ quote UTC: #{Map.get(plan, :quote_at) || "không rõ"} · Tuổi quote lúc gửi: #{quote_age(plan, now) || "không rõ"} giây",
-        "Bắt đầu gửi UTC: #{DateTime.to_iso8601(now)}",
-        "Entry được kiểm tra có hiệu lực tới UTC: #{Map.get(snapshot, :signal_valid_until) || "không rõ"}",
-        "Hết hạn setup UTC: #{plan.setup_expires_at}",
-        note,
-        Enum.join(Map.get(plan, :soft_flags, []), " · ")
+        "XAUUSD · #{side}",
+        "Giá: #{price_text(plan.entry)}",
+        "SL: #{price_text(plan.stop_loss)} | TP1: #{price_text(plan.take_profit)} | TP2: #{price_text(tp2)}",
+        "",
+        "Lý do: #{Map.get(brief, "reason", "")}",
+        "Cơ hội: #{Map.get(brief, "opportunity", "")}",
+        "Rủi ro: #{Map.get(brief, "risk", "")}",
+        "",
+        "Quote UTC: #{Map.get(plan, :quote_at) || "không rõ"} · #{quote_age(plan, now) || "?"} giây tuổi",
+        "Gửi UTC: #{DateTime.to_iso8601(now)} · Hiệu lực entry tới: #{Map.get(snapshot, :signal_valid_until) || "không rõ"}",
+        "Gold API · giá tham khảo, không xác nhận khớp lệnh."
       ],
       "\n"
     )
   end
+
+  defp price_text(value) when is_number(value),
+    do: :erlang.float_to_binary(value * 1.0, decimals: 2)
+
+  defp price_text(_), do: "—"
 
   defp quote_age(plan, now) do
     case DateTime.from_iso8601(Map.get(plan, :quote_at) || "") do
