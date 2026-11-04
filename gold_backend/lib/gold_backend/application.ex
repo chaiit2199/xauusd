@@ -9,6 +9,7 @@ defmodule GoldBackend.Application do
       [
         GoldBackend.Repo,
         GoldBackend.Services.CalendarCache,
+        GoldBackend.Services.EntryBriefCache,
         {Phoenix.PubSub, name: GoldBackend.PubSub},
         {Task.Supervisor, name: GoldBackend.TaskSupervisor},
         GoldBackendWeb.Endpoint

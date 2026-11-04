@@ -1,10 +1,14 @@
+> Luồng Telegram mới: chuẩn bị nhận định từ `PLAN_READY`, cache theo setup + dữ liệu + chu kỳ M15,
+> lấy quote mới và kiểm tra rule trước `READY_TO_ENTER`. Cấu hình riêng
+> `OLLAMA_ENTRY_BRIEF_TIMEOUT_MS=90000`, `OLLAMA_ENTRY_BRIEF_NUM_PREDICT=450`.
+> `OLLAMA_TIMEOUT_MS` bên dưới chỉ áp dụng nhận định dài. Chi tiết và log: [TELEGRAM.md](TELEGRAM.md).
+
 > Telegram hiện chỉ gửi `READY_TO_ENTER` khi quote mới và các hard rule entry đạt.
 > `PLAN_READY`, `WAIT_RETEST`, `PRICE_MOVED`, `INVALIDATED`, `EXPIRED` chỉ cập nhật trên website.
 > Mỗi setup chỉ gửi READY_TO_ENTER thành công một lần; gửi lỗi được thử lại khi vẫn đủ điều kiện.
 
 > Chính sách hiện hành: `scalp-v12-plan-first`. `PLAN_READY` phát từ setup M15
-> hợp lệ, không chờ quote hoặc AI. Telegram gửi các sự kiện plan/entry độc lập
-> với nhận định AI; xem [TELEGRAM.md](TELEGRAM.md). Các mục v7 bên dưới mô tả
+> hợp lệ, không chờ quote hoặc AI. Telegram chỉ gửi entry có ba mục giải thích AI; xem [TELEGRAM.md](TELEGRAM.md). Các mục v7 bên dưới mô tả
 > phiên bản lịch sử. Mức hiện hành: SL cấu trúc tối đa 5 giá (ưu tiên 2–3),
 > R:R sau chi phí tối thiểu 1,2 (1,2–1,5 cảnh báo), TP1 5 giá và TP2 8 giá nếu
 > cấu trúc cho phép. Không kéo SL/TP để đạt rule. H1/chỉ báo/giờ ưu tiên là cảnh báo;

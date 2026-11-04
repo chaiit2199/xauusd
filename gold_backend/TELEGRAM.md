@@ -1,5 +1,39 @@
+# Nhận định Telegram chuẩn bị sớm
+
+`PLAN_READY` chuẩn bị nhận định trong tác vụ nền; không gửi Telegram ở trạng thái này.
+Khi `READY_TO_ENTER`, dùng lại nhận định hợp lệ cùng setup, chu kỳ M15, model và dữ liệu phân tích.
+Cache trong RAM chỉ giữ tối đa 256 mục, hết hạn tại mốc M15 tiếp theo; lỗi AI không được cache.
+Các tác vụ đồng thời cùng setup dùng chung kết quả, không giữ kết nối DB trong lúc chờ model.
+Quote hiện tại không nằm trong khóa cache; tin mới, chỉ báo hoặc mức SL/TP thay đổi tạo khóa mới.
+Trước gửi luôn lấy lại quote và chạy lại hard rule; đổi setup/hướng/SL/TP hoặc entry không đạt thì bỏ gửi.
+
+Cấu hình riêng (không dùng `OLLAMA_TIMEOUT_MS` của nhận định dài):
+
+```bash
+export OLLAMA_ENTRY_BRIEF_TIMEOUT_MS=90000
+export OLLAMA_ENTRY_BRIEF_NUM_PREDICT=450
+```
+
+Đây là receive timeout của Ollama, không phải thời hạn dùng giá cũ. Payload rút gọn gồm setup,
+chỉ báo cần thiết, tối đa 6 tiêu đề mới nhất hôm nay/hôm qua UTC (180 ký tự/tiêu đề), tối đa 6 sự kiện.
+`think: false`; tên H1, M15, EMA20, RSI14 được chấp nhận. Mức giá, tỷ lệ hoặc số độc lập trong
+ba câu vẫn bị từ chối để không gửi số liệu AI tự đặt hoặc giá cũ.
+
+Log `entry_alert` có `setup_id`, `stage`, `result`, `reason`; các bước gồm `ai`, `validation`,
+`cache`, `prepare`, `context`, `quote`, `revalidation`, `delivery`, `dedup`, `exception`.
+Timeout có `stage=entry_brief` và `entry_brief_timeout`; JSON rỗng, lỗi JSON, hết token và
+lỗi từng mục có lý do riêng. Không ghi nội dung thinking hay credential vào log.
+
+Sau triển khai image mới, tạo lại container để nạp biến môi trường; chỉ restart không nạp `env.sh`.
+Không cần migration cho cache này. Kiểm tra cấu hình an toàn:
+
+```bash
+docker exec xauusd-api-1 /app/bin/gold_backend rpc 'IO.inspect(Application.get_env(:gold_backend, :ollama, []) |> Keyword.take([:model, :entry_brief_timeout_ms, :entry_brief_num_predict]))'
+docker logs --since 30m xauusd-api-1 2>&1 | grep -E 'entry_alert|stage=entry_brief|telegram_entry_delivery'
+```
+
 > Nội dung READY_TO_ENTER hiện dùng ba câu AI: Lý do / Cơ hội / Rủi ro.
-> Ollama nhận setup, chỉ báo và tối đa 20 tin hôm nay/hôm qua UTC, `think: false`;
+> Ollama nhận setup, chỉ báo và tối đa 6 tin hôm nay/hôm qua UTC, `think: false`;
 > chỉ lấy JSON phản hồi đã kiểm tra, không lấy trường thinking. AI không thay hướng hoặc SL/TP.
 > Sau AI, lấy lại quote và chạy lại rule. Setup đổi, giá không đạt, hết chu kỳ hoặc AI lỗi thì bỏ lần gửi;
 > chỉ ghi chống trùng khi Telegram chấp nhận. Lượt đánh giá sau có thể thử lại.
@@ -17,7 +51,7 @@ Luồng hiện hành (`scalp-v12-plan-first`): phát `PLAN_READY` khi setup M15 
 xác nhận và vượt qua các kiểm tra bắt buộc, trước khi chờ quote realtime hoặc AI.
 Plan không có nghĩa là vào ngay. Quote mới kiểm tra entry và chuyển sang
 `READY_TO_ENTER`, `WAIT_RETEST`, `PRICE_MOVED` hoặc `INVALIDATED`.
-AI chỉ bổ sung nhận định, không chặn Telegram. SL/TP giữ theo cấu trúc gốc.
+AI cung cấp ba mục giải thích bắt buộc trước khi gửi Telegram. SL/TP giữ theo cấu trúc gốc.
 
 Mỗi setup/event đã gửi thành công được lưu vào `strategy_notifications` để chống
 lặp qua lần refresh/restart. Lỗi gửi được thử lại khi đánh giá tiếp theo; setup hết

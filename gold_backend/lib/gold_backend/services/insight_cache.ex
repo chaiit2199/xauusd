@@ -322,7 +322,8 @@ defmodule GoldBackend.Services.InsightCache do
       # provider or AI. This message is explicitly not an immediate-entry signal.
       GenServer.cast(
         __MODULE__,
-        {:reference_plan, slot, TradingController.rule_snapshot(context)}
+        {:reference_plan, slot,
+         Map.put(TradingController.rule_snapshot(context), :entry_context, context)}
       )
 
       current_quote =
@@ -377,6 +378,8 @@ defmodule GoldBackend.Services.InsightCache do
 
   @impl true
   def handle_cast({:reference_plan, slot, snapshot}, state) do
+    {entry_context, snapshot} = Map.pop(snapshot, :entry_context)
+
     if state.job_slot == slot and state.job != nil and
          CandleClock.current?(CandleClock.closed_at(slot), DateTime.utc_now()) do
       old =
@@ -391,7 +394,9 @@ defmodule GoldBackend.Services.InsightCache do
         if old && Map.get(old.cfd_plan, :setup_id) != Map.get(snapshot.cfd_plan, :setup_id),
           do: GoldBackend.Services.PlanPublisher.publish_terminal(old)
 
-        Map.get(state, :publish, &GoldBackend.Services.PlanPublisher.publish/1).(snapshot)
+        Map.get(state, :publish, &GoldBackend.Services.EntryAlert.publish/1).(
+          Map.put(snapshot, :entry_context, entry_context)
+        )
       end)
     end
 
