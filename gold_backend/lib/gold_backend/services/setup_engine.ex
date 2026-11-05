@@ -83,7 +83,18 @@ defmodule GoldBackend.Services.SetupEngine do
             |> Map.put(:known_at, DateTime.to_iso8601(last.open_time))
           end)
 
-        zones = zones ++ m15_targets ++ m15_locations ++ breakouts
+        # Freeze the allowance from candles preceding the confirmation candle.
+        # M5 and breakout confirmation retain their existing exact-touch rules.
+        locations = zones ++ m15_locations
+
+        locations =
+          Enum.map(locations, fn zone ->
+            if seconds == 900 and not Map.has_key?(zone, :side),
+              do: Zoi.with_touch_tolerance(zone, prior_atr),
+              else: Map.delete(zone, :touch_tolerance)
+          end)
+
+        zones = locations ++ m15_targets ++ breakouts
         base = %{base | indicators: i, atr: i.atr_14, entry: last.close, zones: zones}
 
         touched =
@@ -205,6 +216,7 @@ defmodule GoldBackend.Services.SetupEngine do
       recent
       |> Enum.with_index()
       |> Enum.reverse()
+      |> Enum.sort_by(fn {bar, _} -> not Zoi.touch?(bar, Map.delete(zone, :touch_tolerance)) end)
       |> Enum.find_value(fn {bar, i} ->
         if (is_nil(known) or known <= DateTime.to_iso8601(bar.open_time)) and
              Zoi.touch?(bar, zone),
@@ -222,6 +234,8 @@ defmodule GoldBackend.Services.SetupEngine do
       bars
       |> Enum.take(-4)
       |> Enum.reverse()
+      # Preserve actual touch time/structural stop when exact evidence exists.
+      |> Enum.sort_by(fn b -> not Zoi.touch?(b, Map.delete(zone, :touch_tolerance)) end)
       |> Enum.find(fn b ->
         known = Map.get(zone, :formed_at) || Map.get(zone, :known_at)
         (is_nil(known) or known <= DateTime.to_iso8601(b.open_time)) and Zoi.touch?(b, zone)

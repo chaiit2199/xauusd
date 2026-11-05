@@ -67,7 +67,7 @@ defmodule GoldBackend.Services.SetupLifecycle do
                   known = Map.get(z, :known_at)
 
                   (is_nil(known) or known <= DateTime.to_iso8601(b.open_time)) and
-                    Zoi.touch?(b, z)
+                    Zoi.touch?(b, Map.delete(z, :touch_tolerance))
                 end)
               end)
 

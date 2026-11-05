@@ -66,6 +66,19 @@ defmodule GoldBackend.Services.Zoi do
     end)
   end
 
-  def touch?(bar, zone), do: bar.low <= zone.high and bar.high >= zone.low
+  # Only location matching uses this allowance; structural zone levels stay fixed.
+  def with_touch_tolerance(zone, atr) do
+    config = Application.get_env(:gold_backend, :zone_touch, [])
+    ratio = Keyword.get(config, :atr_ratio, 0.05)
+    cap = Keyword.get(config, :max_usd, 0.30)
+    tolerance = min(max(atr, 0) * max(ratio, 0), max(cap, 0))
+    Map.put(zone, :touch_tolerance, tolerance)
+  end
+
+  def touch?(bar, zone) do
+    tolerance = Map.get(zone, :touch_tolerance, 0.0)
+    bar.low <= zone.high + tolerance and bar.high >= zone.low - tolerance
+  end
+
   defp zone(id, mid, half), do: %{id: id, low: mid - half, mid: mid, high: mid + half}
 end

@@ -1,5 +1,16 @@
 import Config
 
+zone_touch_number = fn name, default ->
+  case Float.parse(System.get_env(name, default)) do
+    {value, ""} when value >= 0 -> value
+    _ -> raise "#{name} must be a non-negative number"
+  end
+end
+
+config :gold_backend, :zone_touch,
+  atr_ratio: zone_touch_number.("ZONE_TOUCH_ATR_RATIO", "0.05"),
+  max_usd: zone_touch_number.("ZONE_TOUCH_MAX_USD", "0.30")
+
 config :gold_backend, :ollama,
   url: System.get_env("OLLAMA_URL", "http://localhost:11434/api/generate"),
   model: System.get_env("OLLAMA_MODEL", "deepseek-r1:1.5b"),
@@ -7,7 +18,7 @@ config :gold_backend, :ollama,
   entry_brief_timeout_ms:
     String.to_integer(System.get_env("OLLAMA_ENTRY_BRIEF_TIMEOUT_MS", "90000")),
   entry_brief_num_predict:
-    String.to_integer(System.get_env("OLLAMA_ENTRY_BRIEF_NUM_PREDICT", "450")),
+    String.to_integer(System.get_env("OLLAMA_ENTRY_BRIEF_NUM_PREDICT", "900")),
   translation_timeout_ms:
     String.to_integer(System.get_env("OLLAMA_TRANSLATION_TIMEOUT_MS", "60000")),
   num_predict: String.to_integer(System.get_env("OLLAMA_NUM_PREDICT", "800"))

@@ -1,6 +1,6 @@
 > Luồng Telegram mới: chuẩn bị nhận định từ `PLAN_READY`, cache theo setup + dữ liệu + chu kỳ M15,
 > lấy quote mới và kiểm tra rule trước `READY_TO_ENTER`. Cấu hình riêng
-> `OLLAMA_ENTRY_BRIEF_TIMEOUT_MS=90000`, `OLLAMA_ENTRY_BRIEF_NUM_PREDICT=450`.
+> `OLLAMA_ENTRY_BRIEF_TIMEOUT_MS=90000`, `OLLAMA_ENTRY_BRIEF_NUM_PREDICT=900`.
 > `OLLAMA_TIMEOUT_MS` bên dưới chỉ áp dụng nhận định dài. Chi tiết và log: [TELEGRAM.md](TELEGRAM.md).
 
 > Telegram hiện chỉ gửi `READY_TO_ENTER` khi quote mới và các hard rule entry đạt.
@@ -487,3 +487,7 @@ Lệnh này vẫn thực hiện các bước chuẩn bị dữ liệu/dịch ti�
 thành công là `{:ok, action, "nhận định tiếng Việt..."}`; `action` có thể là
 `:buy`, `:sell` hoặc `:wait`. `Tin tức xung đột` chỉ là nhãn phân loại tin tức, không phải lỗi
 tiếng Việt. Telegram chỉ gửi khi AI xác nhận cùng chiều Buy/Sell, không gửi khi chờ.
+
+### Dung sai tương tác vùng M15
+
+`ZONE_TOUCH_ATR_RATIO=0.05`, `ZONE_TOUCH_MAX_USD=0.30`: dung sai bổ sung ngoài biên vùng bằng min(0.05 × ATR M15 trước nến xác nhận, 0.30 USD/oz). Đặt ratio=0 để khôi phục chạm vùng chính xác. Chỉ áp dụng vị trí setup hồi M15; không mở rộng vùng cấu trúc, SL, TP, sweep hoặc điều kiện breakout/retest và M5. Xác nhận nến đóng, R:R, giới hạn SL, tin đỏ và quote mới vẫn giữ nguyên. Đây là ngưỡng thử nghiệm, không bảo đảm tăng số entry hay lợi nhuận.

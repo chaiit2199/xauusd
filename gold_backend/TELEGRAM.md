@@ -11,7 +11,7 @@ Cấu hình riêng (không dùng `OLLAMA_TIMEOUT_MS` của nhận định dài):
 
 ```bash
 export OLLAMA_ENTRY_BRIEF_TIMEOUT_MS=90000
-export OLLAMA_ENTRY_BRIEF_NUM_PREDICT=450
+export OLLAMA_ENTRY_BRIEF_NUM_PREDICT=900
 ```
 
 Đây là receive timeout của Ollama, không phải thời hạn dùng giá cũ. Payload rút gọn gồm setup,
