@@ -198,6 +198,35 @@ defmodule GoldBackend.Services.PlanFirstTest do
              )
   end
 
+  test "missing or invalid AI does not block entry, does not leak text, and still deduplicates" do
+    data = snapshot(build(setup_plan(), quote: %{price: 3912.9, timestamp: @now}))
+
+    for brief <- [nil, %{"reason" => "<think>PRIVATE</think>"}] do
+      assert :ok =
+               TelegramNotifier.notify_event(Map.put(data, :entry_brief, brief), "READY_TO_ENTER",
+                 now: @now,
+                 http_post: &post/4
+               )
+
+      assert_receive {:telegram, text}
+      assert text =~ "Nhận định AI chưa sẵn sàng"
+      assert text =~ "SL:"
+      refute text =~ "PRIVATE"
+    end
+
+    data = Map.delete(data, :entry_brief)
+    assert [{:ok, :sent}] = PlanPublisher.publish(data, now: @now, http_post: &post/4)
+    assert_receive {:telegram, _}
+    assert [{:ok, :already_sent}] = PlanPublisher.publish(data, now: @now, http_post: &post/4)
+    refute_receive {:telegram, _}
+    stale = put_in(data, [:signal_valid_until], DateTime.to_iso8601(DateTime.add(@now, -1)))
+
+    assert {:error, _} =
+             TelegramNotifier.notify_event(stale, "READY_TO_ENTER", now: @now, http_post: &post/4)
+
+    refute_receive {:telegram, _}
+  end
+
   test "failed Telegram delivery is retried, and success is durable rather than tied to process memory" do
     data = snapshot(build(setup_plan(), quote: %{price: 3912.9, timestamp: @now}))
     fail = fn _, _, _, _ -> {:error, %HTTPoison.Error{reason: :timeout}} end

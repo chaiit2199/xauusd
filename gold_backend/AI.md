@@ -1,3 +1,5 @@
+> Chính sách Telegram hiện hành: READY_TO_ENTER không chờ AI. Nhận định hợp lệ trong cache là tùy chọn; chưa có thì ghi rõ trạng thái AI. Các mô tả lịch sử bên dưới về AI bắt buộc/xác nhận cùng chiều không áp dụng cho luồng EntryAlert hiện tại. Hard rule và quote mới vẫn bắt buộc.
+
 > Luồng Telegram mới: chuẩn bị nhận định từ `PLAN_READY`, cache theo setup + dữ liệu + chu kỳ M15,
 > lấy quote mới và kiểm tra rule trước `READY_TO_ENTER`. Cấu hình riêng
 > `OLLAMA_ENTRY_BRIEF_TIMEOUT_MS=90000`, `OLLAMA_ENTRY_BRIEF_NUM_PREDICT=900`.
@@ -491,3 +493,7 @@ tiếng Việt. Telegram chỉ gửi khi AI xác nhận cùng chiều Buy/Sell, 
 ### Dung sai tương tác vùng M15
 
 `ZONE_TOUCH_ATR_RATIO=0.05`, `ZONE_TOUCH_MAX_USD=0.30`: dung sai bổ sung ngoài biên vùng bằng min(0.05 × ATR M15 trước nến xác nhận, 0.30 USD/oz). Đặt ratio=0 để khôi phục chạm vùng chính xác. Chỉ áp dụng vị trí setup hồi M15; không mở rộng vùng cấu trúc, SL, TP, sweep hoặc điều kiện breakout/retest và M5. Xác nhận nến đóng, R:R, giới hạn SL, tin đỏ và quote mới vẫn giữ nguyên. Đây là ngưỡng thử nghiệm, không bảo đảm tăng số entry hay lợi nhuận.
+
+### Entry không chờ AI
+
+`READY_TO_ENTER` chỉ sử dụng nhận định hợp lệ đã chuẩn bị trong cache. Khi chưa có nhận định, gửi giá/SL/TP và ghi rõ “Nhận định AI chưa sẵn sàng”. Không chờ tác vụ AI đang chạy, không gửi văn bản AI lỗi và không gửi bổ sung cùng setup khi AI hoàn tất. Nhánh PLAN_READY vẫn chuẩn bị AI; lỗi AI không chặn entry. Trước gửi luôn lấy quote mới, kiểm tra lại hard rule, thời hạn, setup/chiều/SL/TP và chống gửi trùng. Log `entry_transition` ghi plan tham chiếu → quote → trạng thái entry; `entry_revalidation` ghi lần xét lại ngay trước gửi.

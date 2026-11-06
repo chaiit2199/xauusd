@@ -332,8 +332,27 @@ defmodule GoldBackend.Services.InsightCache do
           _ -> nil
         end
 
+      reference_plan = context.plan
+
       context =
         GoldBackend.Services.StrategyPlan.revalidate(context, current_quote, DateTime.utc_now())
+
+      Logger.info(
+        "entry_transition " <>
+          Jason.encode!(%{
+            at: DateTime.utc_now(),
+            setup_id: reference_plan[:setup_id],
+            reference_status: reference_plan[:plan_status],
+            reference_entry: reference_plan[:reference_entry],
+            stop_loss: reference_plan[:stop_loss],
+            take_profit: reference_plan[:take_profit],
+            quote:
+              if(current_quote, do: Map.take(current_quote, [:price, :timestamp]), else: nil),
+            final_setup_id: context.plan[:setup_id],
+            entry_status: context.plan[:trade_plan_status],
+            blockers: context.plan[:blocking_reasons]
+          })
+      )
 
       GoldBackend.Services.SignalHistory.reconcile(context)
 
@@ -347,6 +366,14 @@ defmodule GoldBackend.Services.InsightCache do
                   candle: CandleClock.closed_at(context.analysis_at),
                   version: context.plan.strategy_version,
                   action: context.plan.action,
+                  setup_id: context.plan[:setup_id],
+                  plan_status: context.plan[:plan_status],
+                  entry_status: context.plan[:trade_plan_status],
+                  quote_at: context.plan[:quote_at],
+                  entry: context.plan[:entry],
+                  reference_entry: context.plan[:reference_entry],
+                  stop_loss: context.plan[:stop_loss],
+                  take_profit: context.plan[:take_profit],
                   checks: context.plan.checks
                 })
             )

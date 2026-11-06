@@ -3,7 +3,7 @@
 `PLAN_READY` chuẩn bị nhận định trong tác vụ nền; không gửi Telegram ở trạng thái này.
 Khi `READY_TO_ENTER`, dùng lại nhận định hợp lệ cùng setup, chu kỳ M15, model và dữ liệu phân tích.
 Cache trong RAM chỉ giữ tối đa 256 mục, hết hạn tại mốc M15 tiếp theo; lỗi AI không được cache.
-Các tác vụ đồng thời cùng setup dùng chung kết quả, không giữ kết nối DB trong lúc chờ model.
+Các tác vụ chuẩn bị cùng setup dùng chung kết quả; nhánh entry không chờ khóa AI. Không giữ kết nối DB trong lúc chờ model.
 Quote hiện tại không nằm trong khóa cache; tin mới, chỉ báo hoặc mức SL/TP thay đổi tạo khóa mới.
 Trước gửi luôn lấy lại quote và chạy lại hard rule; đổi setup/hướng/SL/TP hoặc entry không đạt thì bỏ gửi.
 
@@ -20,7 +20,7 @@ chỉ báo cần thiết, tối đa 6 tiêu đề mới nhất hôm nay/hôm qua
 ba câu vẫn bị từ chối để không gửi số liệu AI tự đặt hoặc giá cũ.
 
 Log `entry_alert` có `setup_id`, `stage`, `result`, `reason`; các bước gồm `ai`, `validation`,
-`cache`, `prepare`, `context`, `quote`, `revalidation`, `delivery`, `dedup`, `exception`.
+`cache`, `wording`, `prepare`, `context`, `quote`, `revalidation`, `delivery`, `dedup`, `exception`.
 Timeout có `stage=entry_brief` và `entry_brief_timeout`; JSON rỗng, lỗi JSON, hết token và
 lỗi từng mục có lý do riêng. Không ghi nội dung thinking hay credential vào log.
 
@@ -29,15 +29,15 @@ Không cần migration cho cache này. Kiểm tra cấu hình an toàn:
 
 ```bash
 docker exec xauusd-api-1 /app/bin/gold_backend rpc 'IO.inspect(Application.get_env(:gold_backend, :ollama, []) |> Keyword.take([:model, :entry_brief_timeout_ms, :entry_brief_num_predict]))'
-docker logs --since 30m xauusd-api-1 2>&1 | grep -E 'entry_alert|stage=entry_brief|telegram_entry_delivery'
+docker logs --since 30m xauusd-api-1 2>&1 | grep -E 'entry_transition|entry_revalidation|entry_alert|stage=entry_brief|telegram_entry_delivery'
 ```
 
-> Nội dung READY_TO_ENTER hiện dùng ba câu AI: Lý do / Cơ hội / Rủi ro.
+> READY_TO_ENTER dùng ba câu AI nếu cache đã có nhận định hợp lệ; nếu chưa có, ghi “Nhận định AI chưa sẵn sàng”.
 > Ollama nhận setup, chỉ báo và tối đa 6 tin hôm nay/hôm qua UTC, `think: false`;
 > chỉ lấy JSON phản hồi đã kiểm tra, không lấy trường thinking. AI không thay hướng hoặc SL/TP.
-> Sau AI, lấy lại quote và chạy lại rule. Setup đổi, giá không đạt, hết chu kỳ hoặc AI lỗi thì bỏ lần gửi;
+> Không chờ AI. Lấy lại quote và chạy lại rule. Setup đổi, giá không đạt hoặc hết chu kỳ thì bỏ lần gửi;
 > chỉ ghi chống trùng khi Telegram chấp nhận. Lượt đánh giá sau có thể thử lại.
-> Không có câu viết sẵn thay thế nội dung AI. Website dùng lại phần giải thích để tránh gọi model hai lần.
+> Không giả lập lý do/cơ hội/rủi ro từ AI. Website dùng lại phần giải thích khi tác vụ AI thành công.
 
 > Telegram hiện chỉ gửi `READY_TO_ENTER` khi quote mới và các hard rule entry đạt.
 > `PLAN_READY`, `WAIT_RETEST`, `PRICE_MOVED`, `INVALIDATED`, `EXPIRED` chỉ cập nhật trên website.
@@ -51,7 +51,7 @@ Luồng hiện hành (`scalp-v12-plan-first`): phát `PLAN_READY` khi setup M15 
 xác nhận và vượt qua các kiểm tra bắt buộc, trước khi chờ quote realtime hoặc AI.
 Plan không có nghĩa là vào ngay. Quote mới kiểm tra entry và chuyển sang
 `READY_TO_ENTER`, `WAIT_RETEST`, `PRICE_MOVED` hoặc `INVALIDATED`.
-AI cung cấp ba mục giải thích bắt buộc trước khi gửi Telegram. SL/TP giữ theo cấu trúc gốc.
+AI cung cấp ba mục giải thích tùy chọn; lỗi hoặc chậm AI không chặn Telegram. SL/TP giữ theo cấu trúc gốc.
 
 Mỗi setup/event đã gửi thành công được lưu vào `strategy_notifications` để chống
 lặp qua lần refresh/restart. Lỗi gửi được thử lại khi đánh giá tiếp theo; setup hết
@@ -109,3 +109,7 @@ Bản sửa AI thử chuyển nhận định sang tiếng Việt tối đa một
 dùng `OLLAMA_TRANSLATION_TIMEOUT_MS` riêng, và từ chối bản dịch nếu action thay đổi. Nếu model
 vẫn không trả tiếng Việt hợp lệ, hệ thống giữ lỗi và tiếp tục chờ; không tự tạo
 quyết định AI thay thế.
+
+### Entry không chờ AI
+
+`READY_TO_ENTER` chỉ sử dụng nhận định hợp lệ đã chuẩn bị trong cache. Khi chưa có nhận định, gửi giá/SL/TP và ghi rõ “Nhận định AI chưa sẵn sàng”. Không chờ tác vụ AI đang chạy, không gửi văn bản AI lỗi và không gửi bổ sung cùng setup khi AI hoàn tất. Nhánh PLAN_READY vẫn chuẩn bị AI; lỗi AI không chặn entry. Trước gửi luôn lấy quote mới, kiểm tra lại hard rule, thời hạn, setup/chiều/SL/TP và chống gửi trùng. Log `entry_transition` ghi plan tham chiếu → quote → trạng thái entry; `entry_revalidation` ghi lần xét lại ngay trước gửi.

@@ -22,8 +22,9 @@ defmodule GoldBackend.Services.EntryAlert do
          Map.get(plan, :trade_plan_status) == "READY_TO_ENTER" do
       id = plan.setup_id
 
-      # Network work is outside database transactions. Concurrent reference/live jobs share one brief.
-      :global.trans({{__MODULE__, id}, self()}, fn -> run(plan, context, opts) end)
+      # Delivery must never wait on an in-flight AI preparation lock.
+      lane = if plan[:trade_plan_status] == "READY_TO_ENTER", do: :delivery, else: :prepare
+      :global.trans({{__MODULE__, id, lane}, self()}, fn -> run(plan, context, opts) end)
     else
       []
     end
@@ -47,16 +48,25 @@ defmodule GoldBackend.Services.EntryAlert do
       not current?(context, now) ->
         fail(id, :context, :expired)
 
+      Map.get(plan, :trade_plan_status) == "READY_TO_ENTER" ->
+        brief =
+          case EntryBriefCache.get(cache_key(context, now), now) do
+            {:ok, value} ->
+              if AiDecision.validate_brief(value) == :ok, do: value, else: nil
+
+            :miss ->
+              nil
+          end
+
+        log(id, :wording, if(brief, do: :cached_ai, else: :ai_unavailable))
+        deliver(context, brief, opts, clock)
+
       true ->
         with {:ok, brief} <- prepared(context, opts, now, clock),
              :ok <- ensure_current(context, clock.()),
              :ok <- share_brief(context, brief) do
-          if Map.get(plan, :trade_plan_status) == "READY_TO_ENTER" do
-            deliver(context, brief, opts, clock)
-          else
-            log(id, :prepare, :ready)
-            :prepared
-          end
+          log(id, :prepare, :ready)
+          :prepared
         else
           {:error, {stage, reason}} -> fail(id, stage, reason)
         end
@@ -128,6 +138,7 @@ defmodule GoldBackend.Services.EntryAlert do
          now = clock.(),
          :ok <- ensure_current(context, now),
          fresh = Keyword.get(opts, :revalidate, &StrategyPlan.revalidate/3).(context, quote, now),
+         :ok <- trace_revalidation(context.plan, fresh.plan, quote),
          :ok <- same_ready_setup(context.plan, fresh.plan) do
       snapshot =
         Keyword.get(opts, :snapshot, &TradingController.rule_snapshot/1).(fresh)
@@ -139,6 +150,26 @@ defmodule GoldBackend.Services.EntryAlert do
     else
       {:error, {stage, reason}} -> fail(id, stage, reason)
     end
+  end
+
+  defp trace_revalidation(old, fresh, quote) do
+    Logger.info(
+      "entry_revalidation " <>
+        Jason.encode!(%{
+          setup_id: old[:setup_id],
+          previous_status: old[:trade_plan_status],
+          quote_price: quote[:price],
+          quote_at: quote[:timestamp],
+          reference_entry: old[:reference_entry],
+          stop_loss: old[:stop_loss],
+          take_profit: old[:take_profit],
+          fresh_setup_id: fresh[:setup_id],
+          status: fresh[:trade_plan_status],
+          blockers: fresh[:blocking_reasons]
+        })
+    )
+
+    :ok
   end
 
   defp same_ready_setup(old, fresh) do

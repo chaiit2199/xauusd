@@ -38,12 +38,8 @@ defmodule GoldBackend.Services.EntryAlertTest do
       %{cfd_plan: c.plan, entry_context: c},
       Keyword.merge(
         [
-          brief: fn _ ->
-            send(self(), :ai_done)
-            {:ok, @brief}
-          end,
+          brief: fn _ -> flunk("READY_TO_ENTER must not invoke AI") end,
           quote: fn ->
-            assert_received :ai_done
             {:ok, %{price: 3915.9, timestamp: @now}}
           end,
           clock: fn -> @now end,
@@ -59,7 +55,14 @@ defmodule GoldBackend.Services.EntryAlertTest do
     )
   end
 
-  test "AI wording is followed by fresh quote and revalidation before delivery" do
+  test "cached AI wording still requires a fresh quote and revalidation" do
+    EntryBriefCache.put(
+      EntryAlert.cache_key(context(), @now),
+      @brief,
+      DateTime.add(@now, 60),
+      @now
+    )
+
     assert :ok = run([])
     assert_received {:sent, %{cfd_plan: %{entry: 3915.9}, entry_brief: @brief}}
   end
@@ -82,11 +85,31 @@ defmodule GoldBackend.Services.EntryAlertTest do
     end
   end
 
-  test "failed AI does not mark delivery, allowing next evaluation to retry" do
-    assert {:error, {:ai, :timeout}} = run(brief: fn _ -> {:error, :timeout} end)
-    refute_received {:sent, _}
+  test "failed preparation cannot prevent a ready entry from sending without AI" do
+    c = context()
+    pending = %{c | plan: %{c.plan | action: "wait", trade_plan_status: "PLAN_READY"}}
+
+    assert {:error, {:ai, :timeout}} =
+             EntryAlert.publish(
+               %{cfd_plan: pending.plan, entry_context: pending},
+               clock: fn -> @now end,
+               brief: fn _ -> {:error, :timeout} end
+             )
+
     assert :ok = run([])
-    assert_received {:sent, _}
+    assert_received {:sent, %{entry_brief: nil}}
+  end
+
+  test "invalid cached wording is omitted without preventing a valid entry" do
+    EntryBriefCache.put(
+      EntryAlert.cache_key(context(), @now),
+      %{"reason" => "<think>"},
+      DateTime.add(@now, 60),
+      @now
+    )
+
+    assert :ok = run([])
+    assert_received {:sent, %{entry_brief: nil}}
   end
 
   test "brief rejects thinking, missing sections and model invented price levels" do
@@ -250,7 +273,6 @@ defmodule GoldBackend.Services.EntryAlertTest do
 
   test "diagnostics identify AI, quote, context and revalidation stages" do
     for {opts, stage} <- [
-          {[brief: fn _ -> {:error, :entry_brief_timeout} end], :ai},
           {[quote: fn -> {:error, :stale_quote} end], :quote},
           {[clock: fn -> DateTime.add(@now, 900) end], :context},
           {[
@@ -266,7 +288,7 @@ defmodule GoldBackend.Services.EntryAlertTest do
     end
   end
 
-  test "concurrent plan and live jobs share one in-flight AI request" do
+  test "ready entry sends while plan AI is still running" do
     parent = self()
     live = context()
     pending = %{live | plan: %{live.plan | action: "wait", trade_plan_status: "PLAN_READY"}}
@@ -320,13 +342,13 @@ defmodule GoldBackend.Services.EntryAlertTest do
 
     Ecto.Adapters.SQL.Sandbox.allow(GoldBackend.Repo, self(), ready.pid)
     send(ready.pid, :go)
-    refute_receive :fresh_quote, 50
+    assert :ok = Task.await(ready)
+    assert_received :fresh_quote
+    assert_received {:sent, %{entry_brief: nil}}
+    refute_received :duplicate_ai
     send(prep.pid, :finish_ai)
     assert :prepared = Task.await(prep)
-    assert :ok = Task.await(ready)
-    refute_received :duplicate_ai
-    assert_received :fresh_quote
-    assert_received {:sent, %{entry_brief: @brief}}
+    refute_received {:sent, _}
   end
 
   test "brief payload is bounded and normalizes news timestamps across month boundaries" do

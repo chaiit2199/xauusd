@@ -51,7 +51,6 @@ defmodule GoldBackend.Services.TelegramNotifier do
 
     with :ok <- if(event == "READY_TO_ENTER", do: :ok, else: {:error, :event_disabled}),
          :ok <- validate_event(snapshot, event, now),
-         :ok <- AiDecision.validate_brief(Map.get(snapshot, :entry_brief)),
          :ok <- validate_config(),
          true <- notification_allowed?(now) do
       started = System.monotonic_time(:millisecond)
@@ -125,7 +124,15 @@ defmodule GoldBackend.Services.TelegramNotifier do
   defp future?(_, _), do: false
 
   def format_event(%{cfd_plan: plan} = snapshot, _event, now \\ DateTime.utc_now()) do
-    brief = Map.get(snapshot, :entry_brief, %{})
+    brief = Map.get(snapshot, :entry_brief)
+
+    commentary =
+      if AiDecision.validate_brief(brief) == :ok do
+        "Lý do: #{brief["reason"]}\nCơ hội: #{brief["opportunity"]}\nRủi ro: #{brief["risk"]}"
+      else
+        "Nhận định AI chưa sẵn sàng.\nTín hiệu đã đạt các điều kiện vào lệnh tại thời điểm kiểm tra quote."
+      end
+
     side = plan.action |> String.upcase()
     tp2 = get_in(plan, [:trade_plan, :risk, :tp2])
 
@@ -135,9 +142,7 @@ defmodule GoldBackend.Services.TelegramNotifier do
         "Giá: #{price_text(plan.entry)}",
         "SL: #{price_text(plan.stop_loss)} | TP1: #{price_text(plan.take_profit)} | TP2: #{price_text(tp2)}",
         "",
-        "Lý do: #{Map.get(brief, "reason", "")}",
-        "Cơ hội: #{Map.get(brief, "opportunity", "")}",
-        "Rủi ro: #{Map.get(brief, "risk", "")}",
+        commentary,
         "",
         "Quote UTC: #{Map.get(plan, :quote_at) || "không rõ"} · #{quote_age(plan, now) || "?"} giây tuổi",
         "Gửi UTC: #{DateTime.to_iso8601(now)} · Hiệu lực entry tới: #{Map.get(snapshot, :signal_valid_until) || "không rõ"}",
